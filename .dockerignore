@@ -1,0 +1,11 @@
+.git
+.venv
+.env
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/data
+.playwright-cli
+output
+**/.ruff_cache

@@ -1,0 +1,21 @@
+# 默认使用初始化命令创建的 bsq_app 明细表；可配置为其他只读来源。
+sources:
+  local:
+    table: bsq_app.detail_local
+    columns:
+      month_id: month_id
+      uid: uid
+      device_number: device_number
+      cell_name: cell_name
+      street_name: street_name
+      cell_id: cell_id
+      lac: lac
+  other:
+    table: bsq_app.detail_other
+    columns:
+      month_id: month_id
+      device_number: device_number
+      cell_name: cell_name
+      street_name: street_name
+      cell_id: cell_id
+      lac: lac

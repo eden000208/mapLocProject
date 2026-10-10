@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      DATASOURCE_PATH: /app/datasource.yaml
+    volumes:
+      - ./backend/datasource.yaml:/app/datasource.yaml:ro
+      - bsq_data:/app/data
+    restart: unless-stopped
+    init: true
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+volumes:
+  bsq_data:
