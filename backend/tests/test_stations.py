@@ -166,3 +166,18 @@ def test_confirm_is_idempotent(monkeypatch):
     result = stations.confirm("same-batch", SimpleNamespace(id=1), db)
     assert result["imported"] == 2
     db.execute.assert_not_called()
+
+
+def test_chinese_template_and_coordinate_errors():
+    headers = list(stations.LABELS.values())
+    mapping = dict(zip(stations.FIELDS, headers))
+    valid, errors, _ = stations.parse_rows(
+        headers, [[1, 2, "站点", "区县", "营服", "不是数字", 31]], mapping, "WGS84"
+    )
+    assert not valid
+    assert "经度必须填写数字" in errors[0]["message"]
+    assert "不是数字" not in errors[0]["message"]
+    assert "基站名称" in stations.template(None).body.decode("utf-8-sig")
+    with pytest.raises(HTTPException) as exc:
+        stations.parse_rows(headers, [], {}, "WGS84")
+    assert "经度" in exc.value.detail

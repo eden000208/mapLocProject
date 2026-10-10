@@ -28,6 +28,9 @@ router = APIRouter()
 _lock = threading.RLock()
 _index = None
 FIELDS = ("lac", "cell_id", "station_name", "district", "service_center", "lng", "lat")
+LABELS = dict(
+    zip(FIELDS, ("lac", "cell_id", "基站名称", "区县", "营服", "经度", "纬度"))
+)
 ALIASES = {
     "lac": ("lac", "LAC"),
     "cell_id": ("cell_id", "CELL_ID", "小区ID", "小区编号", "小区号", "CI"),
@@ -149,8 +152,9 @@ def parse_integer(value) -> int:
 
 
 def parse_rows(headers, rows, mapping, coord_sys):
-    if any(mapping.get(k) not in headers for k in FIELDS):
-        raise HTTPException(422, "请映射全部必需字段")
+    missing = [LABELS[k] for k in FIELDS if mapping.get(k) not in headers]
+    if missing:
+        raise HTTPException(422, "请选择对应文件列：" + "、".join(missing))
     cols = {key: headers.index(mapping[key]) for key in FIELDS}
     valid, errors, warnings = {}, [], []
     for row_no, row in enumerate(rows, 2):
@@ -161,11 +165,24 @@ def parse_rows(headers, rows, mapping, coord_sys):
             for key in ("station_name", "district", "service_center"):
                 values[key] = str(values[key] or "").strip()
                 if len(values[key]) > (200 if key == "station_name" else 100):
-                    raise ValueError("名称超过字段长度")
+                    raise ValueError(
+                        f"{LABELS[key]}最多允许 {200 if key == 'station_name' else 100} 个字符"
+                    )
             if not values["district"] and not values["service_center"]:
                 warnings.append(
                     {"row": row_no, "message": "缺少区县和营服，分析员不可见"}
                 )
+            for field, limit in (("lng", 180), ("lat", 90)):
+                try:
+                    number = float(values[field])
+                except (ValueError, TypeError):
+                    raise ValueError(
+                        f"{LABELS[field]}必须填写数字，范围 -{limit}～{limit} 度"
+                    ) from None
+                if not math.isfinite(number) or abs(number) > limit:
+                    raise ValueError(
+                        f"{LABELS[field]}必须填写有限数字，范围 -{limit}～{limit} 度"
+                    )
             lng, lat = float(values["lng"]), float(values["lat"])
             values["lng"], values["lat"] = to_wgs(lng, lat, coord_sys)
             values.update(lng_raw=lng, lat_raw=lat, coord_sys=coord_sys, is_active=True)
@@ -219,7 +236,7 @@ def csv_response(rows, filename):
 
 @router.get("/admin/stations/template")
 def template(user: User = Depends(require_admin)):
-    return csv_response([FIELDS], "stations-template.csv")
+    return csv_response([list(LABELS.values())], "stations-template.csv")
 
 
 @router.post("/admin/stations/import")
@@ -241,7 +258,9 @@ async def upload(
             while chunk := await file.read(65536):
                 size += len(chunk)
                 if size > settings.upload_max_mb * 1024 * 1024:
-                    raise HTTPException(413, "文件超过大小限制")
+                    raise HTTPException(
+                        413, f"文件最大允许 {settings.upload_max_mb} 兆字节"
+                    )
                 stream.write(chunk)
         headers, rows = read_upload(path)
         batch = ImportBatch(
@@ -368,7 +387,7 @@ def errors_csv(
         headers, rows, batch.preview["mapping"], batch.preview["coord_sys"]
     )
     return csv_response(
-        [["row", "message"]] + [[e["row"], e["message"]] for e in errors],
+        [["行号", "错误原因"]] + [[e["row"], e["message"]] for e in errors],
         "import-errors.csv",
     )
 

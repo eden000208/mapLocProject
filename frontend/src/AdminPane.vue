@@ -28,6 +28,20 @@ const fields = [
   "lng",
   "lat",
 ];
+const labels: Record<string, string> = {
+  lac: "lac",
+  cell_id: "cell_id",
+  station_name: "基站名称",
+  district: "区县",
+  service_center: "营服",
+  lng: "经度",
+  lat: "纬度",
+};
+const coordLabels: Record<string, string> = {
+  WGS84: "全球坐标系",
+  GCJ02: "国测坐标系",
+  BD09: "百度坐标系",
+};
 async function load() {
   try {
     users.value = (await api.get("/admin/users")).data;
@@ -75,7 +89,23 @@ async function save() {
       await (e.id
         ? api.patch(`/admin/users/${e.id}`, e)
         : api.post("/admin/users", e));
-    } else await api.patch(`/admin/stations/${e.id}`, e);
+    } else {
+      for (const [field, limit] of [
+        ["lng", 180],
+        ["lat", 90],
+      ] as const) {
+        if (
+          String(e[field]).trim() === "" ||
+          !Number.isFinite(Number(e[field])) ||
+          Math.abs(Number(e[field])) > limit
+        ) {
+          msg.value = `${labels[field]}必须填写数字，范围为 -${limit}～${limit}（单位：度）。`;
+          return;
+        }
+        e[field] = Number(e[field]);
+      }
+      await api.patch(`/admin/stations/${e.id}`, e);
+    }
     editing.value = null;
     msg.value = "已保存";
     load();
@@ -100,6 +130,11 @@ async function upload(ev: Event) {
   }
 }
 async function validate() {
+  const missing = fields.filter((f) => !batch.value.mapping[f]);
+  if (missing.length) {
+    msg.value = "请选择对应文件列：" + missing.map((f) => labels[f]).join("、");
+    return;
+  }
   busy.value = true;
   try {
     mapConfig.value = (await api.get("/config")).data;
@@ -144,7 +179,7 @@ async function validate() {
           const a = p[key];
           if (a) {
             L.circleMarker([a[1], a[0]], { color, radius: 5 })
-              .bindTooltip(key)
+              .bindTooltip(coordLabels[key] || key)
               .addTo(mini);
             bounds.push([a[1], a[0]]);
           }
@@ -271,7 +306,7 @@ onBeforeUnmount(() => mini?.remove());
           <thead>
             <tr>
               <th>名称</th>
-              <th>LAC / Cell ID</th>
+              <th>lac / cell_id</th>
               <th>区县</th>
               <th>营服</th>
               <th>状态</th>
@@ -314,6 +349,11 @@ onBeforeUnmount(() => mini?.remove());
     </div>
     <div v-if="tab === 'import'">
       <h1>导入基站</h1>
+      <p class="hint">
+        支持 .csv、.xlsx 表格，最多十万行。lac/cell_id 为非负整数；基站名称最多
+        200 字，区县和营服最多 100 字；经度 -180～180，纬度
+        -90～90。七个字段均需映射，可在表格内留空名称或区域。
+      </p>
       <div class="steps">
         <span
           v-for="(s, i) in ['上传', '列映射', '校验预览', '确认', '完成']"
@@ -337,9 +377,9 @@ onBeforeUnmount(() => mini?.remove());
       <div v-if="step === 2">
         <div class="mapping">
           <label v-for="f in fields" :key="f"
-            >{{ f
+            >{{ labels[f]
             }}<select v-model="batch.mapping[f]">
-              <option value="">不映射</option>
+              <option value="">请选择对应列（必选）</option>
               <option v-for="h in batch.headers" :key="h">{{ h }}</option>
             </select></label
           >
@@ -347,9 +387,9 @@ onBeforeUnmount(() => mini?.remove());
         <label
           >原始坐标系
           <select v-model="coord">
-            <option>WGS84</option>
-            <option>GCJ02</option>
-            <option>BD09</option>
+            <option value="WGS84">全球坐标系</option>
+            <option value="GCJ02">国测坐标系</option>
+            <option value="BD09">百度坐标系</option>
           </select></label
         ><button class="primary small" :disabled="busy" @click="validate">
           校验并预览
@@ -374,10 +414,12 @@ onBeforeUnmount(() => mini?.remove());
           TIANDITU_KEY。
         </p>
         <div ref="mapEl" class="mini-map"></div>
-        <p class="hint">坐标：蓝色 WGS84 · 绿色 GCJ02 · 黄色 BD09</p>
+        <p class="hint">
+          坐标：蓝色 全球坐标系 · 绿色 国测坐标系 · 黄色 百度坐标系
+        </p>
         <div class="errors">
           <p v-for="(e, i) in preview.errors?.slice(0, 10)" :key="i">
-            {{ typeof e === "string" ? e : JSON.stringify(e) }}
+            {{ typeof e === "string" ? e : `第 ${e.row} 行：${e.message}` }}
           </p>
         </div>
         <button
@@ -458,7 +500,21 @@ onBeforeUnmount(() => mini?.remove());
               'lat',
             ]"
             :key="f"
-            >{{ f }}<input v-model="editing[f]" /></label></template
+            >{{ labels[f]
+            }}<input
+              v-model="editing[f]"
+              :type="['lng', 'lat'].includes(f) ? 'number' : 'text'"
+              :step="['lng', 'lat'].includes(f) ? 'any' : undefined"
+              :min="f === 'lng' ? -180 : f === 'lat' ? -90 : undefined"
+              :max="f === 'lng' ? 180 : f === 'lat' ? 90 : undefined"
+              :maxlength="f === 'station_name' ? 200 : 100"
+              :placeholder="
+                f === 'lng'
+                  ? '-180～180 度'
+                  : f === 'lat'
+                    ? '-90～90 度'
+                    : '请输入' + labels[f]
+              " /></label></template
         ><label
           ><input type="checkbox" v-model="editing.is_active" />启用</label
         >

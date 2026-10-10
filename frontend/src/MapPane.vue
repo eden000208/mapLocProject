@@ -98,9 +98,13 @@ async function load() {
     const b = map.getBounds();
     const r = await api.get("/stations", {
       params: {
-        bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(","),
+        bbox: [
+          Math.max(-180, b.getWest()),
+          Math.max(-90, b.getSouth()),
+          Math.min(180, b.getEast()),
+          Math.min(90, b.getNorth()),
+        ].join(","),
         zoom: map.getZoom(),
-        q: q.value,
       },
     });
     if (disposed || id !== sequence) return;
@@ -139,22 +143,111 @@ async function load() {
     emit("error", errorText(e));
   }
 }
+type Place = { name: string; address: string; lng: number; lat: number };
+const places = ref<Place[]>([]),
+  searching = ref(false),
+  searchMessage = ref("");
+let searchRequest = 0;
+let searchController: AbortController | undefined;
+let placeMarker: L.CircleMarker | undefined;
+function showPlace(place: Place) {
+  placeMarker?.remove();
+  const label = document.createElement("span");
+  label.textContent = place.name + " · " + place.address;
+  placeMarker = L.circleMarker([place.lat, place.lng], {
+    radius: 10,
+    color: "#e66b22",
+    fillOpacity: 0.7,
+    pmIgnore: true,
+  } as L.CircleMarkerOptions)
+    .bindTooltip(label)
+    .addTo(map);
+  map.setView([place.lat, place.lng], 16);
+}
 async function locate() {
-  if (!q.value.trim()) {
-    load();
+  const keyword = q.value.trim();
+  ++searchRequest;
+  searchController?.abort();
+  searching.value = false;
+  places.value = [];
+  if (!keyword || keyword.length > 100) {
+    searchMessage.value =
+      "请输入 1～100 个字符的地名、地址或场所名称，例如：荆门市政府。";
     return;
   }
+  if (!props.config.tianditu_key) {
+    searchMessage.value = "尚未配置天地图密钥，无法搜索地点。";
+    return;
+  }
+  const id = searchRequest;
+  const controller = new AbortController();
+  searchController = controller;
+  const timer = window.setTimeout(() => controller.abort(), 15000);
+  searching.value = true;
+  searchMessage.value = "正在搜索地点…";
   try {
-    const r = await api.get("/stations", { params: { q: q.value, zoom: 18 } });
-    const first = r.data.items[0];
-    if (!first) {
-      emit("error", "未找到授权范围内的站点");
+    const b = map.getBounds();
+    const params = new URLSearchParams({
+      type: "query",
+      tk: props.config.tianditu_key,
+      postStr: JSON.stringify({
+        keyWord: keyword,
+        level: map.getZoom(),
+        mapBound: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(
+          ",",
+        ),
+        queryType: 1,
+        start: 0,
+        count: 10,
+      }),
+    });
+    // 地点搜索直接调用天地图；搜索词不用于过滤基站。
+    const response = await fetch(
+      "https://api.tianditu.gov.cn/v2/search?" + params,
+      { signal: controller.signal },
+    );
+    if (!response.ok) throw new Error("network");
+    const data = await response.json();
+    if (disposed || id !== searchRequest) return;
+    if (data.status && String(data.status.infocode) !== "1000") {
+      searchMessage.value =
+        "天地图地点搜索未成功，请检查密钥是否开通搜索服务及网页域名权限。";
       return;
     }
-    map.setView([first.lat, first.lng], 17);
-    load();
-  } catch (e) {
-    emit("error", errorText(e));
+    const candidates = [
+      ...(data.pois || []),
+      ...(data.area ? [data.area] : []),
+    ];
+    places.value = candidates.flatMap((p: any) => {
+      const [lng, lat] = String(p.lonlat || "")
+        .split(",")
+        .map(Number);
+      return Number.isFinite(lng) &&
+        Number.isFinite(lat) &&
+        Math.abs(lng) <= 180 &&
+        Math.abs(lat) <= 90
+        ? [
+            {
+              name: String(p.name || keyword),
+              address: String(p.address || ""),
+              lng,
+              lat,
+            },
+          ]
+        : [];
+    });
+    searchMessage.value = places.value.length
+      ? "点击结果定位；可输入城市名缩小搜索范围。"
+      : "未找到地点，请补充城市、街道或更完整的场所名称。";
+    if (places.value[0]) showPlace(places.value[0]);
+  } catch {
+    if (!disposed && id === searchRequest)
+      searchMessage.value = controller.signal.aborted
+        ? "地点搜索超时，请重试。"
+        : "无法连接天地图搜索，请检查网络及密钥的搜索服务权限。";
+  } finally {
+    window.clearTimeout(timer);
+    if (id === searchRequest) searching.value = false;
   }
 }
 onMounted(() => {
@@ -228,6 +321,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true;
   locationRequest++;
+  searchRequest++;
+  searchController?.abort();
   map?.remove();
 });
 </script>
@@ -235,7 +330,11 @@ onBeforeUnmount(() => {
   <div class="map-shell">
     <div ref="el" class="map-canvas"></div>
     <div class="location-tools">
-      <button :disabled="locating" title="获取当前位置" @click="currentLocation">
+      <button
+        :disabled="locating"
+        title="获取当前位置"
+        @click="currentLocation"
+      >
         <LocateFixed :size="16" aria-hidden="true" />
         {{ locating ? "正在定位…" : "当前定位" }}
       </button>
@@ -256,9 +355,22 @@ onBeforeUnmount(() => {
     <div class="map-search">
       <input
         v-model="q"
-        placeholder="站点名称 / LAC / Cell ID"
+        placeholder="搜索地名、地址、学校、医院等"
+        maxlength="100"
+        aria-label="地点搜索（1～100 个字符）"
         @keyup.enter="locate"
-      /><button @click="locate">搜索</button>
+      /><button :disabled="searching" @click="locate">
+        {{ searching ? "搜索中…" : "搜索" }}
+      </button>
+      <div class="place-results">
+        <p role="status">
+          {{ searchMessage || "输入 1～100 个字符，例如：荆门市政府" }}
+        </p>
+        <button v-for="(p, i) in places" :key="i" @click="showPlace(p)">
+          <b>{{ p.name }}</b
+          ><small>{{ p.address || "点击查看位置" }}</small>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -283,7 +395,7 @@ onBeforeUnmount(() => {
 .location-tools {
   position: absolute;
   right: 14px;
-  top: 68px;
+  bottom: 40px;
   z-index: 800;
   text-align: right;
   max-width: 330px;
@@ -312,5 +424,36 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: #52647b;
   pointer-events: none;
+}
+</style>
+
+<style scoped>
+.map-search {
+  flex-wrap: wrap;
+  width: 330px;
+  background: white;
+  padding: 8px;
+  border-radius: 6px;
+}
+.place-results {
+  width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.place-results p {
+  margin: 4px 0;
+  font-size: 12px;
+  color: #52647b;
+}
+.place-results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-top: 4px;
+}
+.place-results small {
+  display: block;
+  color: #52647b;
+  margin-top: 4px;
 }
 </style>
