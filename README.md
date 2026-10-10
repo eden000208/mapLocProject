@@ -1,97 +1,141 @@
-# BSQ 基站圈选查询（轻量版）
+# BSQ 基站圈选查询系统
 
-Vue 3 + Leaflet、FastAPI、MySQL。系统数据写入独立 `bsq_app`，在线本网/异网明细查询只读。当前范围以 `docs/PLAN.md` 为准。
+导入基站 → 地图圈选 → 按月查询本网/异网 → 查看并导出 Excel。
 
-## 当前连接状态
+## 1. Windows 启动服务
 
-2026-10-10 已使用远程 MySQL `10.44.225.184:3306` 的 `root` 账号连接成功，服务端为 MySQL 8.0.41。已初始化独立 `bsq_app`，按用户要求创建本网/异网明细表及合成验收数据，并配置天地图 Key。其他库及原有业务表未修改。
+### 首次安装和配置
 
-## 本地开发
-
-Python 3.11+、Node 22.12+。将 `.env.example` 配置为根目录 `.env`（该文件被忽略），填写连接密码和天地图 Key。当前工作区已配置提供的连接信息。
+安装 **Python 3.11+、Node.js 22.12+ 和 Git**。打开 PowerShell：
 
 ```powershell
+git clone https://gitee.com/edengiteeBOOK/map-loc-project.git
+cd map-loc-project
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
-cd backend
-..\.venv\Scripts\python.exe -m app.inspect_db
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+Copy-Item .env.example .env
+notepad .env
 ```
 
-检查命令只展示表字段元信息，不打印明细。`backend/datasource.yaml` 当前映射 `bsq_app.detail_local/detail_other`；接入其他真实来源时可修改映射，表名支持 `数据库.表` 格式。
+在 `.env` 填写 MySQL 和天地图信息：
+
+```dotenv
+MYSQL_HOST=你的MySQL地址
+MYSQL_PORT=3306
+MYSQL_USER=你的数据库账号
+MYSQL_PASSWORD=你的数据库密码
+APP_DATABASE=bsq_app
+TIANDITU_KEY=你的天地图Key
+```
+
+使用已有的远程 MySQL，账号需能创建及读写 `bsq_app`。**本机当前项目已配置并初始化，可以跳过以上步骤。**
+
+首次初始化数据库，按提示设置管理员账号和密码，再安装前端依赖：
 
 ```powershell
-# backend 目录执行，显式创建系统库与表，交互输入管理员密码
+cd backend
 ..\.venv\Scripts\python.exe -m app.init_db
-..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
-# 另一个终端进入 frontend
-npm ci
-npm run dev -- --host 127.0.0.1 --port 5173
+cd ..\frontend
+npm.cmd ci
 ```
 
-打开 http://127.0.0.1:5173。首次登录须改密。管理员可使用地图查询、我的查询和管理工作台，查询全部有效小区并显式查看明文。分析员按区县/营服授权访问，空范围默认无法看到小区。所有账号只能访问自己的任务。
+已有表和管理员不会被覆盖。初始化只创建空表，不生成模拟数据。
 
-当前工作区已初始化管理员，初始凭据在被忽略的 `backend/data/initial-admin.txt`，首次登录改密后删除该文件。它是本地交付文件，不会进入版本库或 Docker 镜像。
+### 每次启动
 
-`allowPublicKeyRetrieval=true` 是 JDBC 驱动选项，不能直接传给 PyMySQL。本项目已包含其 RSA 认证所需的 cryptography 依赖，并已成功完成远程认证。1045 时优先核对实际账号、密码及客户端授权。
+打开 **两个 PowerShell 窗口**，将下面的路径换成你的项目目录。
 
-## 模拟数据与验收
-
-当前已在 `bsq_app.detail_local` 和 `bsq_app.detail_other` 写入带 `DEMO-` 标记的合成明细，每网 240 行，覆盖 2 个月和 4 个小区，`is_demo=1`。演示分析员凭据见被忽略的 `backend/data/demo-login.json`，首次登录须改密；该账号只可访问“模拟区县”的 3 个小区。
-
-重新生成数据并运行真实 MySQL/API 闭环验收：
+窗口一：启动后端。
 
 ```powershell
-cd backend
-..\.venv\Scripts\python.exe -m app.demo --verify
+cd D:\CodexProject\mapWeb\backend
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 
-该命令仅重建标记为模拟的明细，保留正式数据，不改其他库；验收会保留演示任务、清理临时管理员。摘要记录在 `backend/data/acceptance.json`。停止正在运行的后端后执行，完成后重启后端，以避免验收期间进程内参数及任务恢复与正在使用的服务互相影响。
+窗口二：启动前端。
 
-`--verify` 需要开发依赖中的 httpx；仅创建模拟明细和演示账号可运行 `python -m app.demo`。Linux 镜像默认只安装运行依赖。
+```powershell
+cd D:\CodexProject\mapWeb\frontend
+npm.cmd run dev -- --host 127.0.0.1 --port 5173
+```
 
-接入正式数据前，删除模拟明细并停用演示账号；管理页面导入自己的基站。模拟基站 LAC 固定为 990000，名称前缀“模拟”，可按该标记识别。不要将演示查询结果当成真实业务结果。
+浏览器打开 **http://127.0.0.1:5173**。保持两个窗口运行；停止时分别按 `Ctrl+C`。
 
-## Linux Docker
+首次登录须改密。本机管理员凭据见 `backend/data/initial-admin.txt`，演示分析员凭据见 `backend/data/demo-login.json`。这些文件不会上传 Git；新克隆项目使用初始化时设置的账号。
+
+## 2. 迁移到 Linux 并运行
+
+服务器需安装 **Git、Docker Engine、Docker Compose 插件**，并能连接远程 MySQL。
+
+### 下载和配置
+
+```bash
+git clone https://gitee.com/edengiteeBOOK/map-loc-project.git
+cd map-loc-project
+cp .env.example .env
+nano .env
+```
+
+填写与 Windows 相同的 MySQL 信息和天地图 Key，或自行安全复制 Windows 的 `.env` 到项目根目录。`.env` 不在 Git 仓库中。
+
+继续使用同一个 MySQL 的 `bsq_app` 时，账号、基站和查询记录都还在，**不用迁移数据库或重建管理员**。如果换了 MySQL，先备份并恢复原 `bsq_app`，再修改 `.env` 的连接信息。
+
+### 构建和启动
 
 ```bash
 docker compose build
-docker compose run --rm backend python -m app.inspect_db
+# 首次部署执行，已有表和管理员会保留
 docker compose run --rm backend python -m app.init_db
 docker compose up -d
 ```
 
-打开服务器 8080 端口。Compose 不创建 MySQL 容器。外部 MySQL 用户需要 `bsq_app` 建库建表和读写权限、明细表 SELECT 权限。默认 Caddy 内网 HTTP；已有 HTTPS 反代时设置 `COOKIE_SECURE=true`。生产外部 TLS 按部署环境自行配置。
+浏览器打开 **http://服务器IP:8080**，服务器防火墙需开放 8080。Docker 运行网站和后端，不包含 MySQL。
 
-## 使用
+Linux 使用 Docker 数据卷保存临时上传、导出文件。Windows 的 `backend/data` 无需复制，迁移后可以重新上传文件、重新导出结果。
 
-1. 管理员上传 CSV/XLSX，确认列映射和坐标校准，将有效行增量导入；无效行可下载错误报告。
-2. 分析员或管理员在地图放大后画矩形、多边形、圆，或点选站点小区；可按名称、小区号、LAC 搜索。点击“当前定位”后浏览器请求位置授权，显示定位点和精度圈；地图底部显示视口中心经纬度及缩放。定位需要 HTTPS 或 localhost，位置精度取决于设备，拒绝授权不影响手工圈选。
-3. 选择月份与网别、填写事由，提交查询。任务可取消、分页查看和导出 XLSX。
-4. 默认脱敏；明文操作必须有明文权限。结果和导出只属于本人，区域权限收回后再次访问受限。
+### 常用命令
 
-轻量设计：不含 TOTP、审批、覆盖导入、导入回滚、去重视图、配置页、审计哈希链；前端使用 Vue 原生表单与共享状态，减少 UI/状态依赖。
-
-## 验证
-
-```powershell
-cd backend
-..\.venv\Scripts\python.exe -m pytest -q
-..\.venv\Scripts\python.exe -m compileall -q app
-cd ../frontend
-npm run typecheck
-npm run build
+```bash
+# 查看服务状态
+docker compose ps
+# 查看后端日志
+docker compose logs --tail=100 backend
+# 修改 .env 后重新创建服务，使配置生效
+docker compose up -d --force-recreate
+# 更新代码并重新构建运行
+git pull
+docker compose up -d --build
+# 停止服务，保留数据卷
+docker compose down
 ```
 
-单元测试通过 mock/纯函数验证，不创建测试数据库；显式 `app.demo --verify` 使用独立系统库中的合成数据，已通过真实远程 MySQL 验收。运行故障可通过 `/api/health` 判定数据库可达性，错误响应不会暴露 SQL、号码或密码。
+“当前定位”需要 **HTTPS 或 localhost**。普通服务器 IP 的 HTTP 地址可圈选查询，但无法使用浏览器定位。需要定位时配置 HTTPS 反向代理，并设置 `.env` 中的 `COOKIE_SECURE=true`。
 
-实际验证结果见 [docs/VERIFICATION.md](docs/VERIFICATION.md)。离线导入模板为 [docs/stations-template.csv](docs/stations-template.csv)，也可登录管理页下载。坐标系在导入时选择，模板不包含业务示例数据。
+## 3. 基本功能
 
-未设置天地图 Key 时保留可交互地图画布并提示配置缺失；不回退到其他底图。
+- **账号管理**：新建、编辑、停用用户，配置区县、营服和明文权限。
+- **基站管理**：CSV/XLSX 导入、列映射、坐标预览、错误报告、增量更新、编辑和停用。
+- **地图选择**：天地图、站点聚合、搜索、矩形/多边形/圆形圈选和点选；支持当前定位、精度圈和中心坐标。
+- **号码查询**：选择月份和本网/异网，填写事由后提交；查看进度、取消、分页和号码数量统计。
+- **结果导出**：默认脱敏，有权限时可查看明文；XLSX 包含本网明细、异网明细和摘要。
+- **我的查询**：查看自己的历史任务、复用条件。结果和导出文件默认保留 24 小时。
 
-## 维护
+管理员可使用全部菜单、查询所有有效小区和查看明文；分析员按授权区域查询，空范围不可查询。所有用户只能访问自己的任务。
 
-- 配置与表映射通过 `.env`、`datasource.yaml` 修改，重启后生效。
-- 后端必须单进程（workers=1），空间索引和线程任务在进程内维护。
-- 重启后未完成任务标记失败；成功结果及导出按 TTL 清理，失败或取消任务不提供部分明细。
-- 更新前使用 MySQL 官方工具备份 `bsq_app`，凭据通过选项文件或交互输入，不把密码直接放进命令；后续表结构变化执行明确 SQL，不使用迁移框架。
-- 不要改已有明细表。MySQL 明细查询需 `(month_id,lac,cell_id)` 索引或等效分区；大数据量查询性能依赖实际库。
+操作顺序：**登录 → 导入基站 → 地图圈选 → 选择月份/网别 → 查询 → 查看或导出**。
+
+### 数据说明
+
+默认本网表为 `bsq_app.detail_local`，异网表为 `bsq_app.detail_other`。接入其他来源时修改 `backend/datasource.yaml` 并重启后端。基站导入只导入地图站点，不生成号码明细。
+
+本机数据库保留了带 `DEMO-` 标记的模拟数据。需要重新生成并验收时，先停止后端，在 Windows 项目根目录执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
+cd backend
+..\.venv\Scripts\python.exe -m app.demo --verify
+```
+
+完成后重新启动后端。该命令会生成模拟明细、导入模拟基站并验收查询导出，模拟结果不能作为真实业务结果。
+
+更多信息：[接口说明](docs/API.md) · [验证记录](docs/VERIFICATION.md) · [基站模板](docs/stations-template.csv)。Linux Compose 配置已提供，尚未在 Linux 实测。
