@@ -128,14 +128,40 @@ docker compose down
 
 默认本网表为 `bsq_app.detail_local`，异网表为 `bsq_app.detail_other`。接入其他来源时修改 `backend/datasource.yaml` 并重启后端。基站导入只导入地图站点，不生成号码明细。
 
-本机数据库保留了带 `DEMO-` 标记的模拟数据。需要重新生成并验收时，先停止后端，在 Windows 项目根目录执行：
+初始化只创建空表，正式使用前应清理演示数据。下面的命令均须先停止后端，避免查询或导入与清理同时运行。脚本仅允许写入 `bsq_app`；不删除数据库、表结构、管理员或普通业务明细。
+
+#### Windows：生成与清理
+
+在项目根目录安装验收依赖，然后进入后端目录：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
 cd backend
+# 只生成合成明细和演示分析员（不导入地图基站）
+..\.venv\Scripts\python.exe -m app.demo
+# 生成并验收：包含模拟基站、查询、分页及导出
 ..\.venv\Scripts\python.exe -m app.demo --verify
+# 验收后清理模拟数据，恢复正式使用状态；可重复执行
+..\.venv\Scripts\python.exe -m app.demo --clean
 ```
 
-完成后重新启动后端。该命令会生成模拟明细、导入模拟基站并验收查询导出，模拟结果不能作为真实业务结果。
+按需选择生成命令，不必连续执行两种生成方式。`--verify` 需要可用的 MySQL、已初始化的系统表及天地图配置。演示分析员凭据写入被忽略的 `backend/data/demo-login.json`；模拟结果不能作为真实业务结果。
+
+#### Linux Compose
+
+```bash
+docker compose stop backend
+# 仅生成模拟明细和演示账号
+docker compose run --rm backend python -m app.demo
+# 可选：生成并验收（运行容器内临时安装验收依赖）
+docker compose run --rm backend sh -c "pip install --user httpx==0.28.1 && python -m app.demo --verify"
+# 正式使用前清理模拟数据
+docker compose run --rm backend python -m app.demo --clean
+docker compose up -d backend
+```
+
+清理范围：两张自有明细表中 `is_demo=true` 的行、保留 LAC `990000` 下四个带精确模拟名称和区域标记的小区、演示分析员及其会话/导入/日志、仅使用这些模拟小区的查询任务与结果/导出，以及演示凭据和验收报告。其余账号、业务小区、`is_demo=false` 明细及管理员凭据保留。遇到模拟标记被修改、混合业务与模拟小区任务或运行中的模拟任务时停止清理，不模糊匹配删除；先核对相关数据后重试。
+
+`--clean` 与 `--verify` 不可同时使用。清理完成后重新启动后端，地图空间索引会重新加载。缓存、浏览器截图与构建产物不属于数据库内容，也不会上传 Git。
 
 更多信息：[接口说明](docs/API.md) · [验证记录](docs/VERIFICATION.md) · [基站模板](docs/stations-template.csv)。Linux Compose 配置已提供，尚未在 Linux 实测。

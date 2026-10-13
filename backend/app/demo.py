@@ -22,7 +22,15 @@ from .config import settings
 from .db import SessionLocal, engine
 from .detail_schema import create_detail_tables, local_table, other_table
 from .main import app
-from .models import ImportBatch, LoginSession, OperationLog, QueryRow, QueryTask, User
+from .models import (
+    ImportBatch,
+    LoginSession,
+    OperationLog,
+    QueryRow,
+    QueryTask,
+    Station,
+    User,
+)
 
 DISTRICT = "模拟区县"
 LAC = 990000
@@ -30,10 +38,110 @@ MONTHS = ["202608", "202609"]
 FIELDS = ["lac", "cell_id", "station_name", "district", "service_center", "lng", "lat"]
 
 
+def demo_station(station: Station) -> bool:
+    """仅识别生成脚本保留的四个模拟小区，不按模糊名称删除。"""
+    return (
+        station.lac == LAC
+        and station.cell_id in range(1, 5)
+        and station.station_name == f"模拟基站{station.cell_id}"
+        and station.district in {DISTRICT, "模拟未授权区县"}
+        and station.service_center == ""
+    )
+
+
+def cleanup_demo() -> dict[str, int]:
+    """清理显式模拟数据及关联任务；保留业务数据和管理员。"""
+    if settings.app_database != "bsq_app" or engine.url.database != "bsq_app":
+        raise ValueError("模拟数据清理仅允许在 bsq_app 执行")
+    files = [
+        settings.data_dir / "demo-login.json",
+        settings.data_dir / "acceptance.json",
+    ]
+    counts = {}
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.username == "demo_analyst"))
+        if user and (user.name != "模拟分析员" or user.role != "analyst"):
+            raise ValueError("模拟账号标记已变更，停止清理")
+        stations = list(db.scalars(select(Station).where(Station.lac == LAC)))
+        if any(not demo_station(s) for s in stations):
+            raise ValueError("模拟小区保留编号存在非模拟数据，停止清理")
+        for table in (local_table, other_table):
+            if (
+                db.scalar(
+                    select(table.c.id)
+                    .where(table.c.lac == LAC, table.c.is_demo.is_(False))
+                    .limit(1)
+                )
+                is not None
+            ):
+                raise ValueError("模拟小区保留编号存在业务明细，停止清理")
+        tasks = list(db.scalars(select(QueryTask)))
+        selected = []
+        for task in tasks:
+            keys = task.cell_keys or []
+            has_demo = any(k.get("lac") == LAC for k in keys)
+            only_demo = bool(keys) and all(
+                k.get("lac") == LAC and k.get("cell_id") in range(1, 5) for k in keys
+            )
+            if has_demo and not only_demo:
+                raise ValueError("存在混合业务与模拟小区的任务，停止清理")
+            if user and task.user_id == user.id and not only_demo:
+                raise ValueError("演示账号存在非模拟查询任务，停止清理")
+            if only_demo or (user and task.user_id == user.id):
+                if task.status in {"PENDING", "RUNNING"}:
+                    raise ValueError("模拟任务仍在运行，请停止后端后清理")
+                selected.append(task)
+        task_ids = [t.id for t in selected]
+        for task in selected:
+            folder = settings.data_dir / "exports"
+            files.extend(folder.glob(f"{task.id}-*-masked.xlsx"))
+            files.extend(folder.glob(f"{task.id}-*-plain.xlsx"))
+        if task_ids:
+            db.execute(delete(QueryRow).where(QueryRow.task_id.in_(task_ids)))
+            db.execute(delete(QueryTask).where(QueryTask.id.in_(task_ids)))
+        if user:
+            for batch in db.scalars(
+                select(ImportBatch).where(ImportBatch.user_id == user.id)
+            ):
+                files.append(Path(batch.path))
+            db.execute(delete(ImportBatch).where(ImportBatch.user_id == user.id))
+            db.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
+            db.execute(delete(OperationLog).where(OperationLog.user_id == user.id))
+            db.delete(user)
+        for station in stations:
+            db.delete(station)
+        for table in (local_table, other_table):
+            result = db.execute(delete(table).where(table.c.is_demo.is_(True)))
+            counts[table.name] = result.rowcount
+        root = settings.data_dir.resolve()
+        if any(not p.resolve().is_relative_to(root) for p in files):
+            raise ValueError("模拟文件路径超出数据目录，停止清理")
+        db.commit()
+    for path in files:
+        path.unlink(missing_ok=True)
+    counts.update(
+        tasks=len(selected), stations=len(stations), users=int(user is not None)
+    )
+    return counts
+
+
 def seed_details() -> None:
     create_detail_tables()
+    with SessionLocal() as db:
+        stations = db.scalars(select(Station).where(Station.lac == LAC))
+        if any(not demo_station(s) for s in stations):
+            raise ValueError("模拟小区保留编号存在非模拟数据，停止生成")
     with engine.begin() as connection:
         for net, table in (("local", local_table), ("other", other_table)):
+            if (
+                connection.scalar(
+                    select(table.c.id)
+                    .where(table.c.lac == LAC, table.c.is_demo.is_(False))
+                    .limit(1)
+                )
+                is not None
+            ):
+                raise ValueError("模拟小区保留编号存在业务明细，停止生成")
             connection.execute(delete(table).where(table.c.is_demo.is_(True)))
             values = []
             for month in MONTHS:
@@ -422,10 +530,15 @@ def run_acceptance(data: dict) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--clean", action="store_true", help="清理模拟数据及关联文件")
+    mode.add_argument(
         "--verify", action="store_true", help="Run real MySQL/API acceptance"
     )
     args = parser.parse_args()
+    if args.clean:
+        print(json.dumps(cleanup_demo(), ensure_ascii=False))
+        return
     seed_details()
     data = credentials()
     if args.verify:
