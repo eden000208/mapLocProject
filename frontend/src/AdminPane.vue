@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, nextTick } from "vue";
+import { onMounted, onBeforeUnmount, ref, nextTick, watch } from "vue";
 import { api, errorText } from "./api";
 import L from "leaflet";
+import {
+  UserPlus,
+  Search,
+  UploadCloud,
+  Download,
+  CheckCircle2,
+  X,
+} from "lucide-vue-next";
 const tab = ref("users"),
   users = ref<any[]>([]),
   stations = ref<any[]>([]),
@@ -19,6 +27,38 @@ const tab = ref("users"),
   mapEl = ref<HTMLElement>(),
   mapConfig = ref<any>(null);
 let mini: L.Map | undefined;
+let miniResize: ResizeObserver | undefined;
+let miniResizeFrame = 0;
+const modalEl = ref<HTMLFormElement>();
+let modalOpener: HTMLElement | null = null;
+watch(editing, async (value) => {
+  if (value) {
+    modalOpener = document.activeElement as HTMLElement;
+    msg.value = "";
+    await nextTick();
+    modalEl.value
+      ?.querySelector<HTMLElement>(
+        "input:not(:disabled), select:not(:disabled)",
+      )
+      ?.focus();
+  } else modalOpener?.focus();
+});
+function modalKeydown(event: KeyboardEvent) {
+  if (event.key !== "Tab") return;
+  const controls = modalEl.value?.querySelectorAll<HTMLElement>(
+    "button:not(:disabled), input:not(:disabled), select:not(:disabled)",
+  );
+  if (!controls?.length) return;
+  const first = controls[0],
+    last = controls[controls.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 const fields = [
   "lac",
   "cell_id",
@@ -136,6 +176,7 @@ async function validate() {
     return;
   }
   busy.value = true;
+  msg.value = "";
   try {
     mapConfig.value = (await api.get("/config")).data;
     preview.value = (
@@ -145,9 +186,20 @@ async function validate() {
       })
     ).data;
     step.value = 3;
-    await nextTick();
+  } catch (e) {
+    msg.value = errorText(e);
+  } finally {
+    busy.value = false;
+  }
+}
+// 预览容器重新挂载时重建地图，避免切换标签后留下空白画布。
+watch(mapEl, () => {
+  try {
+    miniResize?.disconnect();
+    cancelAnimationFrame(miniResizeFrame);
     mini?.remove();
-    if (mapEl.value) {
+    mini = undefined;
+    if (mapEl.value && preview.value && mapConfig.value) {
       mini = L.map(mapEl.value, { maxZoom: 18 });
       const pts = preview.value.points || [];
       if (mapConfig.value.tianditu_key) {
@@ -172,9 +224,9 @@ async function validate() {
       const bounds: L.LatLngTuple[] = [];
       for (const p of pts) {
         for (const [key, color] of [
-          ["WGS84", "#1677ff"],
-          ["GCJ02", "#14a88b"],
-          ["BD09", "#d09522"],
+          ["WGS84", "#5b7c8b"],
+          ["GCJ02", "#4f6a53"],
+          ["BD09", "#ad8744"],
         ]) {
           const a = p[key];
           if (a) {
@@ -191,13 +243,18 @@ async function validate() {
           [mapConfig.value.map_center[1], mapConfig.value.map_center[0]],
           mapConfig.value.map_zoom,
         );
+      miniResize = new ResizeObserver(() => {
+        cancelAnimationFrame(miniResizeFrame);
+        miniResizeFrame = requestAnimationFrame(() =>
+          mini?.invalidateSize({ pan: false }),
+        );
+      });
+      miniResize.observe(mapEl.value);
     }
   } catch (e) {
     msg.value = errorText(e);
-  } finally {
-    busy.value = false;
   }
-}
+}, { flush: "post" });
 async function confirmImport() {
   busy.value = true;
   try {
@@ -227,10 +284,14 @@ async function download(path: string, name: string) {
   }
 }
 onMounted(load);
-onBeforeUnmount(() => mini?.remove());
+onBeforeUnmount(() => {
+  miniResize?.disconnect();
+  cancelAnimationFrame(miniResizeFrame);
+  mini?.remove();
+});
 </script>
 <template>
-  <div class="content">
+  <div class="content admin-content">
     <div class="tabs">
       <button
         v-for="(label, key) in {
@@ -245,11 +306,16 @@ onBeforeUnmount(() => mini?.remove());
         {{ label }}
       </button>
     </div>
-    <p class="hint">{{ msg }}</p>
+    <p v-if="msg" class="inline-message" role="status">{{ msg }}</p>
     <div v-if="tab === 'users'">
       <div class="toolbar">
-        <h1>账号管理</h1>
-        <button @click="edit(null)">＋ 新建用户</button>
+        <div class="section-title">
+          <h2>账号管理</h2>
+          <p class="muted">管理登录账号及可查询的区域范围。</p>
+        </div>
+        <button class="primary compact" @click="edit(null)">
+          <UserPlus :size="16" />新建用户
+        </button>
       </div>
       <div class="scroll-table">
         <table>
@@ -260,7 +326,7 @@ onBeforeUnmount(() => mini?.remove());
               <th>角色</th>
               <th>区县 / 营服</th>
               <th>状态</th>
-              <th></th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -275,7 +341,13 @@ onBeforeUnmount(() => mini?.remove());
                   ) || "未分配"
                 }}
               </td>
-              <td>{{ u.is_active ? "启用" : "停用" }}</td>
+              <td>
+                <span
+                  class="badge"
+                  :data-status="u.is_active ? 'active' : 'inactive'"
+                  >{{ u.is_active ? "启用" : "停用" }}</span
+                >
+              </td>
               <td><button @click="edit(u)">编辑</button></td>
             </tr>
           </tbody>
@@ -283,11 +355,15 @@ onBeforeUnmount(() => mini?.remove());
       </div>
     </div>
     <div v-if="tab === 'stations'">
-      <h1>基站维护</h1>
+      <div class="section-title">
+        <h2>基站维护</h2>
+        <p class="muted">搜索、编辑并维护地图上的有效小区。</p>
+      </div>
       <div class="toolbar">
         <input
           v-model="q"
-          placeholder="搜索基站"
+          placeholder="输入基站名称"
+          aria-label="搜索基站"
           @keyup.enter="
             stationPage = 1;
             load();
@@ -298,7 +374,7 @@ onBeforeUnmount(() => mini?.remove());
             load();
           "
         >
-          搜索
+          <Search :size="15" />搜索
         </button>
       </div>
       <div class="scroll-table">
@@ -310,7 +386,7 @@ onBeforeUnmount(() => mini?.remove());
               <th>区县</th>
               <th>营服</th>
               <th>状态</th>
-              <th></th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -319,7 +395,13 @@ onBeforeUnmount(() => mini?.remove());
               <td>{{ s.lac }} / {{ s.cell_id }}</td>
               <td>{{ s.district }}</td>
               <td>{{ s.service_center }}</td>
-              <td>{{ s.is_active ? "启用" : "停用" }}</td>
+              <td>
+                <span
+                  class="badge"
+                  :data-status="s.is_active ? 'active' : 'inactive'"
+                  >{{ s.is_active ? "启用" : "停用" }}</span
+                >
+              </td>
               <td><button @click="edit(s, 'station')">编辑</button></td>
             </tr>
           </tbody>
@@ -348,7 +430,7 @@ onBeforeUnmount(() => mini?.remove());
       </button>
     </div>
     <div v-if="tab === 'import'">
-      <h1>导入基站</h1>
+      <h2>导入基站</h2>
       <p class="hint">
         支持 .csv、.xlsx 表格，最多十万行。lac/cell_id 为非负整数；基站名称最多
         200 字，区县和营服最多 100 字；经度 -180～180，纬度
@@ -359,17 +441,24 @@ onBeforeUnmount(() => mini?.remove());
           v-for="(s, i) in ['上传', '列映射', '校验预览', '确认', '完成']"
           :key="s"
           :class="{ active: step === i + 1 }"
-          >{{ i + 1 }} {{ s }}</span
+          :aria-current="step === i + 1 ? 'step' : undefined"
+        >
+          <b>{{ i + 1 }}</b
+          >{{ s }}</span
         >
       </div>
       <div v-if="step === 1" class="upload">
+        <UploadCloud :size="32" />
+        <h3>上传基站数据</h3>
+        <p class="muted">选择 CSV 或 Excel 文件，按步骤完成映射与校验。</p>
         <button
           @click="download('/admin/stations/template', '基站导入模板.csv')"
         >
-          下载模板</button
+          <Download :size="15" />下载模板</button
         ><input
           type="file"
           accept=".csv,.xlsx"
+          aria-label="上传基站 CSV 或 Excel 文件"
           :disabled="busy"
           @change="upload"
         />
@@ -410,8 +499,7 @@ onBeforeUnmount(() => mini?.remove());
           >
         </div>
         <p v-if="!mapConfig?.tianditu_key" class="hint">
-          未配置天地图 Key，底图暂不可用；仍可查看坐标预览点。请在 .env 设置
-          TIANDITU_KEY。
+          底图暂不可用，请联系管理员；仍可查看坐标预览点。
         </p>
         <div ref="mapEl" class="mini-map"></div>
         <p class="hint">
@@ -448,7 +536,9 @@ onBeforeUnmount(() => mini?.remove());
           确认导入 {{ preview.valid_count }} 行
         </button>
       </div>
-      <div v-if="step === 5">
+      <div v-if="step === 5" class="import-done">
+        <CheckCircle2 :size="36" />
+        <h3>基站数据已导入</h3>
         <p>{{ msg }}</p>
         <button
           @click="
@@ -460,9 +550,40 @@ onBeforeUnmount(() => mini?.remove());
         </button>
       </div>
     </div>
-    <div v-if="editing" class="modal-backdrop">
-      <form class="modal" @submit.prevent="save">
-        <h2>{{ kind === "user" ? "编辑账号" : "编辑基站" }}</h2>
+    <div
+      v-if="editing"
+      class="modal-backdrop"
+      @click.self="editing = null"
+      @keydown.esc="editing = null"
+    >
+      <form
+        ref="modalEl"
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-title"
+        @keydown="modalKeydown"
+        @submit.prevent="save"
+      >
+        <div class="modal-heading">
+          <h2 id="edit-title">
+            {{
+              kind === "user"
+                ? editing.id
+                  ? "编辑账号"
+                  : "新建用户"
+                : "编辑基站"
+            }}
+          </h2>
+          <button
+            type="button"
+            class="text-button"
+            aria-label="关闭编辑"
+            @click="editing = null"
+          >
+            <X :size="18" />
+          </button>
+        </div>
         <template v-if="kind === 'user'"
           ><label
             >账号<input
@@ -518,9 +639,10 @@ onBeforeUnmount(() => mini?.remove());
         ><label
           ><input type="checkbox" v-model="editing.is_active" />启用</label
         >
+        <p v-if="msg" class="inline-message" role="status">{{ msg }}</p>
         <div class="toolbar">
           <button type="button" @click="editing = null">取消</button
-          ><button type="submit">保存</button>
+          ><button type="submit" class="primary compact">保存更改</button>
         </div>
       </form>
     </div>

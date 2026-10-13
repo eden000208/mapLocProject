@@ -1,7 +1,20 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from "vue";
 import L from "leaflet";
-import { LocateFixed } from "lucide-vue-next";
+import {
+  LocateFixed,
+  Search,
+  Square,
+  Pentagon,
+  Circle,
+  Trash2,
+  Plus,
+  Minus,
+  Compass,
+  MapPin,
+  X,
+  MousePointer2,
+} from "lucide-vue-next";
 import "@geoman-io/leaflet-geoman-free";
 import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css";
 import "leaflet.markercluster";
@@ -16,13 +29,17 @@ const el = ref<HTMLElement>(),
   tileFailed = ref(false),
   locating = ref(false),
   locationMessage = ref(""),
-  mapState = ref("");
+  mapState = ref(""),
+  stationCount = ref(0),
+  drawMode = ref("");
 let map: L.Map, cluster: L.MarkerClusterGroup;
 let sequence = 0;
 let disposed = false;
 let locationMarker: L.CircleMarker | undefined;
 let accuracyCircle: L.Circle | undefined;
 let locationRequest = 0;
+let resizeObserver: ResizeObserver | undefined;
+let resizeFrame = 0;
 // 仅在用户点击时请求定位；不持久化位置，视口加载沿用普通地图请求。
 function currentLocation() {
   if (locating.value) return;
@@ -48,7 +65,7 @@ function currentLocation() {
       // 定位精度为估计半径；定位图形不参与基站选择。
       accuracyCircle = L.circle([latitude, longitude], {
         radius: accuracy,
-        color: "#1677ff",
+        color: "#5b7c8b",
         fillOpacity: 0.08,
         interactive: false,
         pmIgnore: true,
@@ -57,7 +74,7 @@ function currentLocation() {
         radius: 8,
         color: "#fff",
         weight: 3,
-        fillColor: "#1677ff",
+        fillColor: "#5b7c8b",
         fillOpacity: 1,
         interactive: false,
         pmIgnore: true,
@@ -129,9 +146,12 @@ async function load() {
       } else {
         const m = L.circleMarker([s.lat, s.lng], {
           radius: 6,
-          color: "#1677ff",
+          color: "#4f6a53",
+          fillColor: "#78906b",
+          weight: 2,
           fillOpacity: 0.8,
-        });
+          pmIgnore: true,
+        } as L.CircleMarkerOptions);
         const tooltip = document.createElement("span");
         tooltip.textContent = s.station_name || "未命名站点";
         m.bindTooltip(tooltip);
@@ -139,6 +159,10 @@ async function load() {
         cluster.addLayer(m);
       }
     }
+    stationCount.value = r.data.items.reduce(
+      (count: number, s: any) => count + (s.kind === "cluster" ? s.count : 1),
+      0,
+    );
   } catch (e) {
     emit("error", errorText(e));
   }
@@ -156,7 +180,7 @@ function showPlace(place: Place) {
   label.textContent = place.name + " · " + place.address;
   placeMarker = L.circleMarker([place.lat, place.lng], {
     radius: 10,
-    color: "#e66b22",
+    color: "#b75b40",
     fillOpacity: 0.7,
     pmIgnore: true,
   } as L.CircleMarkerOptions)
@@ -176,7 +200,7 @@ async function locate() {
     return;
   }
   if (!props.config.tianditu_key) {
-    searchMessage.value = "尚未配置天地图密钥，无法搜索地点。";
+    searchMessage.value = "地点搜索暂不可用，请联系管理员。";
     return;
   }
   const id = searchRequest;
@@ -250,11 +274,33 @@ async function locate() {
     if (id === searchRequest) searching.value = false;
   }
 }
-onMounted(() => {
-  map = L.map(el.value!, { maxZoom: 18 }).setView(
+function setDrawMode(mode: string) {
+  const next = drawMode.value === mode ? "" : mode;
+  map.pm.disableDraw();
+  map.pm.disableGlobalRemovalMode();
+  drawMode.value = next;
+  if (next === "remove") map.pm.enableGlobalRemovalMode();
+  else if (next) map.pm.enableDraw(next as "Rectangle" | "Polygon" | "Circle");
+}
+function resetView() {
+  map.setView(
     [props.config.map_center[1], props.config.map_center[0]],
     props.config.map_zoom,
   );
+}
+onMounted(() => {
+  map = L.map(el.value!, { maxZoom: 18, zoomControl: false }).setView(
+    [props.config.map_center[1], props.config.map_center[0]],
+    props.config.map_zoom,
+  );
+  // 监听实际容器变化，兼容窗口缩放、侧栏断点及字体尺寸变化。
+  resizeObserver = new ResizeObserver(() => {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => {
+      if (!disposed) map.invalidateSize({ pan: false });
+    });
+  });
+  resizeObserver.observe(el.value!);
   if (props.config.tianditu_key) {
     L.tileLayer(tiles(), {
       subdomains: "01234567",
@@ -272,17 +318,16 @@ onMounted(() => {
   }
   cluster = L.markerClusterGroup().addTo(map);
   map.pm.setLang("zh");
-  map.pm.addControls({
-    position: "topleft",
-    drawMarker: false,
-    drawCircleMarker: false,
-    drawPolyline: false,
-    drawText: false,
-    editMode: false,
-    dragMode: false,
-    cutPolygon: false,
-    removalMode: true,
-    rotateMode: false,
+  map.pm.setGlobalOptions({
+    pathOptions: {
+      color: "#b75b40",
+      fillColor: "#b75b40",
+      fillOpacity: 0.1,
+      weight: 2,
+    },
+  });
+  map.on("pm:drawend", () => {
+    drawMode.value = "";
   });
   map.on("pm:create", async (e: any) => {
     if (map.getZoom() < (props.config.min_draw_zoom || 12)) {
@@ -323,137 +368,450 @@ onBeforeUnmount(() => {
   locationRequest++;
   searchRequest++;
   searchController?.abort();
+  resizeObserver?.disconnect();
+  cancelAnimationFrame(resizeFrame);
   map?.remove();
 });
 </script>
 <template>
   <div class="map-shell">
-    <div ref="el" class="map-canvas"></div>
-    <div class="location-tools">
+    <div ref="el" class="map-canvas" aria-label="基站选择地图"></div>
+    <form class="map-search" @submit.prevent="locate">
+      <div class="search-input-row">
+        <Search :size="17" /><input
+          v-model="q"
+          placeholder="搜索地名、地址或场所"
+          maxlength="100"
+          aria-label="地点搜索（1～100 个字符）"
+        /><button type="submit" :disabled="searching">
+          {{ searching ? "搜索中…" : "搜索" }}
+        </button>
+      </div>
+      <div v-if="searchMessage || places.length" class="place-results">
+        <div class="search-result-heading">
+          <p role="status">{{ searchMessage }}</p>
+          <button
+            type="button"
+            aria-label="关闭搜索结果"
+            @click="
+              places = [];
+              searchMessage = '';
+            "
+          >
+            <X :size="14" />
+          </button>
+        </div>
+        <button
+          type="button"
+          v-for="(p, i) in places"
+          :key="i"
+          @click="showPlace(p)"
+        >
+          <MapPin :size="15" /><span
+            ><b>{{ p.name }}</b
+            ><small>{{ p.address || "点击查看位置" }}</small></span
+          >
+        </button>
+      </div>
+    </form>
+    <div class="draw-toolbar" role="group" aria-label="圈选工具">
+      <button
+        :class="{ active: !drawMode }"
+        aria-label="点选"
+        title="点选站点"
+        :aria-pressed="!drawMode"
+        @click="setDrawMode('')"
+      >
+        <MousePointer2 :size="16" /><span>点选</span></button
+      ><span class="tool-divider"></span
+      ><button
+        v-for="tool in [
+          { mode: 'Rectangle', label: '矩形', icon: Square },
+          { mode: 'Polygon', label: '多边形', icon: Pentagon },
+          { mode: 'Circle', label: '圆形', icon: Circle },
+        ]"
+        :key="tool.mode"
+        :aria-label="tool.label"
+        :title="tool.label + '圈选'"
+        :class="{ active: drawMode === tool.mode }"
+        :aria-pressed="drawMode === tool.mode"
+        @click="setDrawMode(tool.mode)"
+      >
+        <component :is="tool.icon" :size="16" /><span>{{
+          tool.label
+        }}</span></button
+      ><span class="tool-divider"></span
+      ><button
+        :class="{ active: drawMode === 'remove' }"
+        aria-label="移除"
+        title="移除圈选范围"
+        :aria-pressed="drawMode === 'remove'"
+        @click="setDrawMode('remove')"
+      >
+        <Trash2 :size="16" /><span>移除</span>
+      </button>
+    </div>
+    <div class="map-guide">
+      <span class="station-dot"></span
+      ><span>视野内 {{ stationCount.toLocaleString() }} 个站点</span
+      ><span class="guide-divider"></span
+      ><span>{{
+        drawMode === "remove"
+          ? "点击图形移除圈选范围"
+          : drawMode
+            ? "在地图上绘制查询范围"
+            : "点击站点添加小区"
+      }}</span>
+    </div>
+    <div class="map-controls">
       <button
         :disabled="locating"
         title="获取当前位置"
+        aria-label="获取当前位置"
         @click="currentLocation"
       >
-        <LocateFixed :size="16" aria-hidden="true" />
-        {{ locating ? "正在定位…" : "当前定位" }}
+        <LocateFixed :size="18" /></button
+      ><button
+        title="返回初始视野"
+        aria-label="返回初始视野"
+        @click="resetView"
+      >
+        <Compass :size="18" /></button
+      ><span></span
+      ><button title="放大" aria-label="放大地图" @click="map.zoomIn()">
+        <Plus :size="18" /></button
+      ><button title="缩小" aria-label="缩小地图" @click="map.zoomOut()">
+        <Minus :size="18" />
       </button>
-      <p v-if="locationMessage" role="status">{{ locationMessage }}</p>
+    </div>
+    <div v-if="locationMessage" class="location-message" role="status">
+      {{ locationMessage }}
     </div>
     <div class="map-state">{{ mapState }}</div>
-    <div v-if="!config.tianditu_key" class="map-key-hint" role="status">
-      未配置天地图 Key，底图暂不可用。请在 .env 中配置
-      TIANDITU_KEY；仍可加载站点并圈选。
-    </div>
     <div
-      v-if="config.tianditu_key && tileFailed"
+      v-if="!config.tianditu_key || tileFailed"
       class="map-key-hint"
       role="status"
     >
-      底图加载失败，请检查天地图 Key 的 Web 权限及网络；仍可加载站点并圈选。
-    </div>
-    <div class="map-search">
-      <input
-        v-model="q"
-        placeholder="搜索地名、地址、学校、医院等"
-        maxlength="100"
-        aria-label="地点搜索（1～100 个字符）"
-        @keyup.enter="locate"
-      /><button :disabled="searching" @click="locate">
-        {{ searching ? "搜索中…" : "搜索" }}
-      </button>
-      <div class="place-results">
-        <p role="status">
-          {{ searchMessage || "输入 1～100 个字符，例如：荆门市政府" }}
-        </p>
-        <button v-for="(p, i) in places" :key="i" @click="showPlace(p)">
-          <b>{{ p.name }}</b
-          ><small>{{ p.address || "点击查看位置" }}</small>
-        </button>
-      </div>
+      {{
+        !config.tianditu_key
+          ? "底图暂不可用，请联系管理员。仍可点选站点或圈选区域。"
+          : "底图加载失败，请检查网络或联系管理员。仍可选择站点。"
+      }}
     </div>
   </div>
 </template>
-
 <style scoped>
-.map-key-hint {
-  position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 800;
-  max-width: 80%;
-  padding: 12px 18px;
-  border: 1px solid #e5d5ae;
-  border-radius: 6px;
-  background: #fffaf0;
-  color: #805a15;
-  box-shadow: 0 2px 8px #0001;
-  font-size: 13px;
-  line-height: 1.6;
+.map-shell {
+  position: relative;
+  min-width: 0;
+  isolation: isolate;
+  background: #eeede5;
 }
-.location-tools {
-  position: absolute;
-  right: 14px;
-  bottom: 40px;
-  z-index: 800;
-  text-align: right;
-  max-width: 330px;
+.map-canvas {
+  height: 100%;
+  width: 100%;
+  background: #eeede5;
+  font-family: inherit;
 }
-.location-tools p {
-  padding: 9px 12px;
-  background: #fff;
-  border: 1px solid #d8e4f4;
-  border-radius: 5px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #52647b;
-}
-.location-tools button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.map-state {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  z-index: 800;
-  background: #ffffffdf;
-  padding: 4px 10px;
-  font-size: 11px;
-  color: #52647b;
-  pointer-events: none;
-}
-</style>
-
-<style scoped>
 .map-search {
-  flex-wrap: wrap;
-  width: 330px;
-  background: white;
-  padding: 8px;
-  border-radius: 6px;
+  position: absolute;
+  top: 1.2857rem;
+  left: 1.2857rem;
+  z-index: 800;
+  width: min(27.1429rem, calc(100% - 2.5714rem));
+  border: 1px solid var(--line);
+  border-radius: 0.6429rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.search-input-row {
+  display: flex;
+  align-items: center;
+  padding: 0.4286rem 0.5rem 0.4286rem 0.9286rem;
+  gap: 0.6429rem;
+}
+.search-input-row > svg {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.search-input-row input {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font-size: 0.8571rem;
+  padding: 0.5714rem 0;
+}
+.search-input-row button {
+  min-height: 2.2143rem;
+  font-size: 0.8571rem;
+  padding: 0.4286rem 0.7857rem;
+  background: var(--sidebar);
+  border: 0;
+  white-space: nowrap;
 }
 .place-results {
-  width: 100%;
-  max-height: 260px;
-  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  padding: 0.7143rem;
+  max-height: 19.2857rem;
+  overflow: auto;
 }
-.place-results p {
-  margin: 4px 0;
-  font-size: 12px;
-  color: #52647b;
+.search-result-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5714rem;
 }
-.place-results button {
-  display: block;
+.search-result-heading p {
+  flex: 1;
+  font-size: 0.8571rem;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0 0 0.5714rem;
+}
+.search-result-heading button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  min-height: 1.2857rem;
+}
+.place-results > button {
+  display: flex;
+  justify-content: flex-start;
   width: 100%;
   text-align: left;
-  margin-top: 4px;
+  padding: 0.7143rem 0.5rem;
+  border: 0;
+  background: transparent;
+}
+.place-results > button > svg {
+  color: var(--accent);
+}
+.place-results b {
+  font-size: 0.8571rem;
+  font-weight: 500;
 }
 .place-results small {
   display: block;
-  color: #52647b;
-  margin-top: 4px;
+  margin-top: 0.2857rem;
+  color: var(--muted);
+  font-size: 0.8571rem;
+}
+.draw-toolbar {
+  position: absolute;
+  top: 5.5714rem;
+  left: 1.2857rem;
+  z-index: 750;
+  display: flex;
+  align-items: center;
+  gap: 0.1429rem;
+  background: var(--surface);
+  padding: 0.3571rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5714rem;
+  box-shadow: var(--shadow);
+}
+.draw-toolbar button {
+  min-height: 2.3571rem;
+  gap: 0.3571rem;
+  padding: 0.5rem 0.6429rem;
+  border: 0;
+  font-size: 0.8571rem;
+  background: transparent;
+  color: #777970;
+}
+.draw-toolbar button.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.tool-divider {
+  height: 1.2143rem;
+  width: 1px;
+  background: var(--line);
+  margin: 0 0.1429rem;
+}
+.map-guide {
+  position: absolute;
+  left: 1.2857rem;
+  bottom: 3.0714rem;
+  z-index: 750;
+  display: flex;
+  align-items: center;
+  gap: 0.5714rem;
+  padding: 0.7143rem 0.8571rem;
+  background: #fffefdee;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  color: #666b5d;
+  font-size: 0.8571rem;
+}
+.station-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #78906b;
+  border: 1px solid #4f6a53;
+}
+.guide-divider {
+  width: 1px;
+  height: 0.8571rem;
+  background: var(--line);
+  margin: 0 0.2143rem;
+}
+.map-controls {
+  position: absolute;
+  right: 1.2857rem;
+  bottom: 3.0714rem;
+  z-index: 750;
+  display: flex;
+  flex-direction: column;
+  padding: 0.2857rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.5714rem;
+  box-shadow: var(--shadow);
+}
+.map-controls button {
+  border: 0;
+  min-height: 2.4286rem;
+  width: 2.4286rem;
+  padding: 0.5rem;
+  background: transparent;
+  color: #61665b;
+}
+.map-controls > span {
+  height: 1px;
+  margin: 0.2143rem;
+  background: var(--line);
+}
+.location-message {
+  position: absolute;
+  right: 4.8571rem;
+  bottom: 10.3571rem;
+  z-index: 800;
+  max-width: min(20.3571rem, calc(100% - 6.4286rem));
+  padding: 0.8571rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.5714rem;
+  color: var(--muted);
+  font-size: 0.8571rem;
+  line-height: 1.7;
+}
+.map-state {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 750;
+  padding: 0.5rem 0.7143rem;
+  font-size: 0.7857rem;
+  color: #74776a;
+  background: #fffefdcc;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.map-key-hint {
+  position: absolute;
+  left: 1.2857rem;
+  top: 9.6429rem;
+  z-index: 750;
+  max-width: calc(100% - 2.5714rem);
+  padding: 0.7143rem 0.9286rem;
+  border: 1px solid #ddd0b1;
+  border-radius: 0.5rem;
+  background: #fcf8ed;
+  color: #8d7443;
+  font-size: 0.8571rem;
+  line-height: 1.7;
+}
+:deep(.leaflet-container) {
+  font-family: inherit;
+}
+:deep(.leaflet-control-attribution) {
+  color: #777970;
+  background: #fffefdcc;
+  font-size: 0.7857rem;
+}
+:deep(.leaflet-control-attribution a) {
+  color: #666b5d;
+}
+:deep(.leaflet-tooltip) {
+  border: 1px solid var(--line);
+  border-radius: 0.3571rem;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 0.8571rem;
+}
+:deep(.cluster-pin) {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #4f6a53;
+  color: white;
+  border: 0.2857rem solid #cad5bf;
+  font-weight: 600;
+  font-size: 0.8571rem;
+}
+:deep(.marker-cluster-small),
+:deep(.marker-cluster-medium),
+:deep(.marker-cluster-large) {
+  background: #cad5bfa0;
+}
+:deep(.marker-cluster-small div),
+:deep(.marker-cluster-medium div),
+:deep(.marker-cluster-large div) {
+  background: #4f6a53;
+  color: white;
+}
+@media (max-width: 1050px) {
+  .draw-toolbar button {
+    padding: 0.5rem;
+  }
+  .draw-toolbar button > span {
+    display: none;
+  }
+  .map-guide {
+    max-width: calc(100% - 5.8571rem);
+    flex-wrap: wrap;
+    gap: 0.4286rem;
+  }
+  .guide-divider {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .map-search,
+  .draw-toolbar {
+    left: 0.8571rem;
+  }
+  .map-search {
+    top: 0.8571rem;
+    width: calc(100% - 1.7143rem);
+  }
+  .draw-toolbar {
+    top: 5rem;
+  }
+  .draw-toolbar button {
+    padding: 0.5rem 0.5714rem;
+  }
+  .map-guide {
+    left: 0.8571rem;
+    bottom: 2.8571rem;
+  }
+  .map-controls {
+    right: 0.8571rem;
+    bottom: 2.8571rem;
+  }
+  .map-key-hint {
+    left: 0.8571rem;
+    top: 8.7857rem;
+    max-width: calc(100% - 1.7143rem);
+  }
+}
+@media (max-width: 760px) and (min-width: 420px) {
+  .draw-toolbar button > span {
+    display: inline;
+  }
 }
 </style>
