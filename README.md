@@ -165,3 +165,50 @@ docker compose up -d backend
 `--clean` 与 `--verify` 不可同时使用。清理完成后重新启动后端，地图空间索引会重新加载。缓存、浏览器截图与构建产物不属于数据库内容，也不会上传 Git。
 
 更多信息：[接口说明](docs/API.md) · [验证记录](docs/VERIFICATION.md) · [基站模板](docs/stations-template.csv)。Linux Compose 配置已提供，尚未在 Linux 实测。
+
+## 4. 项目结构
+
+前端按业务面板组织 Vue 组件；后端按功能域组织 controller、service、DTO 三层，采用 Python 模块及函数命名：
+
+```text
+mapWeb/
+├── frontend/                        # Vue 3 / TypeScript / Leaflet
+│   ├── src/
+│   │   ├── main.ts / App.vue         # 应用入口、登录及工作台
+│   │   ├── MapPane.vue              # 地图、圈选及查询结果
+│   │   ├── AdminPane.vue            # 账号与基站维护/导入
+│   │   ├── DetailUploadPane.vue     # 用户信息（号码明细）导入
+│   │   └── api.ts / types.ts / style.css # API 封装、类型、共享样式
+│   └── package.json / package-lock.json / vite.config.ts / tsconfig.json
+├── backend/
+│   ├── app/
+│   │   ├── main.py                  # FastAPI 装配、异常处理、生命周期
+│   │   ├── controllers/             # auth / stations / query / detail_upload / system
+│   │   ├── services/                # 同功能域业务、事务及任务运行状态
+│   │   ├── dto/                     # auth / stations / query 请求模型
+│   │   ├── dependencies.py          # 身份、权限及 CSRF 依赖
+│   │   ├── config.py / db.py / models.py # 配置、MySQL 连接、ORM 模型
+│   │   ├── datasource.py / detail_schema.py # 明细来源与自有表定义
+│   │   ├── geo.py / audit.py         # 坐标工具、摘要日志
+│   │   └── init_db.py / inspect_db.py / demo.py # 初始化、结构检查、模拟数据命令
+│   ├── tests/                       # mock 业务、权限与分层回归测试
+│   ├── datasource.yaml              # 明细查询表/字段白名单映射
+│   └── requirements.in / requirements.txt / requirements-dev.txt / pyproject.toml
+├── deploy/                          # 后端/Web Dockerfile、Caddyfile
+├── compose.yaml                     # Linux 服务编排
+├── docs/                            # PLAN/API、验证记录、基站模板、模拟导入样例
+├── .env.example / .env              # 配置示例；.env 仅本地保留，不进 Git
+└── AGENTS.md / .gitignore / .gitattributes / .dockerignore
+```
+
+controller 负责请求参数与依赖注入，统一委派 service；DTO 保留现有字段和校验。事务、授权复核、MySQL 网别锁、查询线程池及空间索引均留在对应 service。旧同名模块仅保留明确的兼容导出；新功能和测试直接导入分层模块。详细迁移对应见[接口说明](docs/API.md)。
+
+`backend/data/` 为本地运行文件，`.venv/`、`frontend/node_modules/` 为开发依赖；这些目录均保留但不提交。浏览器验收截图、缓存及 `frontend/dist/` 可重新生成，2026-10-14 的清理已将其可恢复归档到项目外，不影响源码、配置或数据库。
+
+在项目根目录执行后端检查：
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall -q backend/app backend/tests
+.\.venv\Scripts\python.exe -m pytest backend/tests -q
+.\.venv\Scripts\python.exe -m ruff check backend/app backend/tests
+```

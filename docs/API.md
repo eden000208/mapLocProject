@@ -47,10 +47,35 @@ GET /config → {tianditu_key,map_center:[lng,lat],map_zoom,min_draw_zoom,max_ce
 GET /health → {status:'ok'|'unavailable'}，无数据库连接时503。
 
 ## 后端共享约定
-auth.py 导出 current_user(request,db=Depends(get_db))、require_admin、require_query、visible_filter(user)、cell_visible(user,station)、user_payload；get_db/SessionLocal 在 db.py。
-stations.py 导出 invalidate_index()、validate_cells(db,user,keys) → 去重授权有效 Station 列表（无效/越权422/403）。
-query.py 导出 router、start_maintenance()、stop_maintenance()；启动恢复任务、周期TTL清理。
-audit.py 导出 log_event(db,user_id,action,params=None)，不自动 commit；仅摘要，不含号码/uid。
+
+`app/controllers/` 仅声明路由、请求参数和 FastAPI 依赖，并调用同功能域的 `app/services/`；`app/dto/` 存放原有 Pydantic 请求模型及校验器。所有已有 HTTP 路径、参数默认值、模型名称和响应契约保持不变。
+
+`dependencies.py` 导出 `current_user(request, db=Depends(get_db))`、`require_admin`、`require_query`，所有路由及测试 override 复用同一函数对象。`services/auth.py` 提供 `visible_filter(user)`、`cell_visible(user, station)`、`user_payload` 和账号业务。
+
+`services/stations.py` 提供 `invalidate_index()`、`validate_cells(db, user, keys)` → 去重授权有效 Station 列表（无效/越权422/403），并统一持有空间索引与锁。
+
+`services/query.py` 提供 `start_maintenance()`、`stop_maintenance()`；统一持有查询线程池、并发限额、恢复状态及 TTL 清理。`services/detail_upload.py` 保留明细上传全量校验、单事务写入及 MySQL 网别锁。`services/system.py` 提供健康检查及公开配置。
+
+`get_db`/`SessionLocal` 位于 `db.py`；配置、ORM 模型、明细来源、坐标及日志仍为共享基础设施。`audit.py` 导出 `log_event(db, user_id, action, params=None)`，不自动 commit；仅摘要，不含号码/uid。
+
+原 `app.auth`、`app.stations`、`app.query`、`app.detail_upload` 仅显式重导出旧入口，不保留第二份业务实现。新增代码直接从分层模块导入；业务测试 mock 应 patch 实现所在的 service，HTTP 依赖 override 使用 `dependencies` 中的函数。
+
+### 原实现迁移对应
+
+| 原位置 | 新位置 | 迁移内容 |
+| --- | --- | --- |
+| `app.auth` | `services/auth.py` | 原账号业务及辅助函数，共15个函数，函数体不变 |
+| `app.auth` | `dependencies.py` | `current_user`、`require_admin`、`require_query`，函数体及依赖身份不变 |
+| `app.auth` | `dto/auth.py` | `LoginBody`、`PasswordBody`、`UserBody`、`UserPatch` |
+| `app.stations` | `services/stations.py` | 原19个函数、空间索引及锁 |
+| `app.stations` | `dto/stations.py` | `PreviewBody`、`StationPatch`、`SelectionBody` |
+| `app.query` | `services/query.py` | 原27个函数、`TaskInterrupted`、查询运行状态 |
+| `app.query` | `dto/query.py` | `CellKey`、`QueryBody` |
+| `app.detail_upload` | `services/detail_upload.py` | 原13个函数、导入常量及事务/网别锁边界 |
+| `app.main` | `services/system.py` | `health`、`public_config` 原函数体 |
+| 原业务模块及 `app.main` | `controllers/{auth,stations,query,detail_upload,system}.py` | 原29个 HTTP 操作的同名路由函数，原签名/默认值/依赖不变，仅委派 |
+
+`main.py` 保留应用装配、异常处理和生命周期；生命周期调用 query service。服务函数不声明 `Depends`、`Query`、`File` 或 `Form`，所有路由参数由 controller 显式传入。未新增持久化层、数据表、数据库或迁移框架。
 
 ## 当前默认明细来源
 

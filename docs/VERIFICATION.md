@@ -64,3 +64,26 @@
 - README 同步 Windows 和 Linux Compose 的生成、完整验收、清理和服务重启命令，说明适用范围及拒绝清理条件。Linux 命令仅静态核对，当前机器未执行 Docker 验证。
 - 检查版本控制文件，无需删除业务源码、模板或部署文件。本地浏览器验收脚本/截图/下载、验收日志、Python 测试/语法检查缓存和前端构建产物已移至项目外可恢复归档 `D:\CodexProject\mapWeb-cleanup-archive-20261013`；直接删除被自动审核拒绝，改用可恢复移动完成目录清理。保留 `.env`、虚拟环境、前端依赖和管理员凭据。前述截图及临时验收脚本不再留在当前项目目录。
 - 新增清理防护 mock 测试；后端 **42 passed**、Ruff、Python 语法检查、前端 typecheck/build 通过。真实数据库仅验证清理及幂等性；没有重新生成测试数据，清理后保持无本脚本模拟数据状态。仍保留既有 Geoman sourcemap 和单 JS 包大小构建提醒。
+
+## 后端结构重构验收（2026-10-14）
+
+- 按功能域拆分 `controllers`、`services`、`dto`，共享权限依赖位于 `dependencies.py`。29 个 HTTP 操作全部由薄 controller 显式传参委派 service；main 保留装配、异常处理及生命周期。config/db/models 等基础设施未改；未新增业务类、持久化表或数据库。
+- 在修改前保存四个原业务模块、main 原源码及完整 OpenAPI 基线到项目外临时目录，并运行原有 mock 测试：**57 passed**。重构后逐项 AST 检查：**84 个原函数体**、**9 个 DTO 类**、**27 个原业务路由的参数签名和装饰器**、**20 项常量与任务/索引状态声明**均相等。main 生命周期仅改为调用实际 query service；health/config 原函数体移入 system service。完整 OpenAPI 文档深比较相等，含全部 **29 个 HTTP 操作**。
+- 原测试只调整实现及 DTO import，保留业务断言和 mock。新增 29 个逐路由委派检查、6 个真实 TestClient HTTP 参数/依赖委派检查、1 个分层及权限函数身份检查，合计 **93 passed**。覆盖 controller 原参数顺序、异步上传 await、DTO 身份、权限依赖 override 共用对象、service 无 FastAPI 参数默认对象，以及原有导入失败回滚、网别锁释放、授权重验等业务测试。
+- Python `py_compile` 检查 app/tests **42 个文件**通过；`ruff check backend/app backend/tests`、`git diff --check` 通过。测试依赖 Starlette/AnyIO 有一条既存 BlockingPortal 别名弃用提醒，不影响测试。
+- 本次后端验证仅使用纯函数及 mock，**未连接或写入真实 MySQL**，未运行初始化/演示/清理命令，未输出真实号码、UID 或凭据。AST/OpenAPI 等价检查与 mock 通过不能替代真实 MySQL 导入事务、GET_LOCK、长时间查询/导出或重启恢复的端到端复验；真实数据库、大数据量性能及 Linux Compose/Caddy 部署仍需在实际环境验证。
+- 前端用户信息导入模块重绘由并行 agent 完成；主 agent 已执行前端 `npm run typecheck`、`npm run build`，均通过。浏览器交互验收结果另记；本次后端结构验证未连接真实数据库，未使用真实号码或 UID。
+
+## 用户信息导入界面重绘验收（2026-10-14）
+
+- 仅修改 `frontend/src/DetailUploadPane.vue` 的模板、scoped 样式及图标 import；原业务脚本除图标导入外完整保留。基站导入界面及后端导入契约未变。
+- Playwright 使用 API 模拟完成 **10 项交互检查**：初始校验禁用；有效预览展示网别、月份及行数；错误预览禁止确认；错误状态停留校验步骤；完成状态禁止重复确认及校验；切换网别清空批次和预览；busy 时禁用网别、文件、校验与确认；校验请求失败显示错误、清空预览并恢复控件；上传失败显示错误且禁止校验；键盘 Tab 可访问文件输入并展示 focus 提示。全部通过。
+- 检查 1440px、390px、320px 布局及有效预览、错误预览、完成状态截图，主 agent 已查看并通过视觉审阅；320px 页面无横向溢出。5 张截图位于被忽略的 `output/playwright/detail-ui-{desktop,mobile,valid,invalid-mobile,complete-mobile}.png`。
+- 前端 `npm run typecheck`、`npm run build` 再次通过。保留已有 Leaflet Geoman CSS sourcemap 与单包体积提醒，不阻止构建；验收预览进程已停止。
+- 浏览器仅使用明确标记的模拟账号和数据，未真实登录、查询或写入数据库，未输出真实号码或 UID。上述结果验证页面布局及模拟交互，不能替代真实导入和数据库权限的端到端验收。
+
+## 非核心文件清理与结构说明（2026-10-14）
+
+- 本次浏览器验收截图及脚本现已可恢复归档至项目外 `D:\CodexProject\mapWeb-cleanup-archive-20261014\backend-ui-20261014\output\playwright`；前述 `output/playwright` 路径为验收时位置。根 output 仅包含 playwright 目录，已一并归档空容器层级。
+- 同步归档 `.playwright-cli`、根 `.ruff_cache`、`backend/.pytest_cache`、`backend/app`（含 controllers/dto/services）及 `backend/tests` 的5个 `__pycache__`、`frontend/dist`。逐项验证源路径位于项目目录内，使用 PowerShell `Move-Item -LiteralPath` 移动，未删除历史产物。
+- 保留核心源码、tests、权威文档、模板/模拟样例、部署及依赖配置，以及 `.env`、运行 data、虚拟环境和 node_modules；未发现应删除的已跟踪非核心文件，未强删。README 更新为完整项目结构，说明前端面板、API/类型/样式、后端分层/工具/命令/测试/依赖、部署、文档及配置。未操作数据库。

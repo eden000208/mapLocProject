@@ -6,8 +6,8 @@ import pytest
 from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 
-from app import detail_upload as module
-from app.auth import current_user
+from app.services import detail_upload as module
+from app.dependencies import current_user
 from app.main import app
 from app.models import utcnow
 

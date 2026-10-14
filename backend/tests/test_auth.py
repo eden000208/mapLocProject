@@ -6,18 +6,17 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app.auth import (
-    UserPatch,
+from app.dependencies import current_user, require_query
+from app.dto.auth import UserPatch
+from app.models import LoginSession, User, utcnow
+from app.services.auth import (
     cell_visible,
-    current_user,
     edit_user,
     hash_password,
-    require_query,
     user_payload,
     verify_password,
     visible_filter,
 )
-from app.models import LoginSession, User, utcnow
 
 
 def test_password():

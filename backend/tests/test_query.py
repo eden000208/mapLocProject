@@ -1,13 +1,14 @@
+import zipfile
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-import zipfile
 
 import pytest
 from fastapi import HTTPException
 
-from app import query
+from app.dto.query import QueryBody
 from app.models import utcnow
+from app.services import query
 
 
 def task(**kwargs):
@@ -137,7 +138,7 @@ def test_cancellation_and_total_timeout_checked():
 
 def test_invalid_purpose_and_month_are_rejected():
     with pytest.raises(ValueError):
-        query.QueryBody(
+        QueryBody(
             cells=[{"lac": 1, "cell_id": 2}],
             months=["202601"],
             nets=["local"],

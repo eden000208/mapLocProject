@@ -6,8 +6,9 @@ from fastapi import HTTPException
 from shapely.geometry import Point
 from shapely.strtree import STRtree
 
-from app import stations
+from app.dto.stations import PreviewBody, SelectionBody
 from app.models import Station
+from app.services import stations
 
 
 def test_import_duplicates_and_errors():
@@ -45,7 +46,7 @@ def test_preview_coord_keys_interpret_raw(monkeypatch):
     db.scalar.return_value = 0
     result = stations.preview(
         "batch",
-        stations.PreviewBody(mapping={k: k for k in headers}, coord_sys="GCJ02"),
+        PreviewBody(mapping={k: k for k in headers}, coord_sys="GCJ02"),
         SimpleNamespace(id=1),
         db,
     )
@@ -98,7 +99,7 @@ def test_polygon_includes_boundary_and_filters(monkeypatch):
         "get_index",
         lambda db: (rows, STRtree([Point(r["lng"], r["lat"]) for r in rows])),
     )
-    body = stations.SelectionBody(
+    body = SelectionBody(
         type="polygon",
         geometry={
             "type": "Polygon",

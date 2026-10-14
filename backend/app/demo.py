@@ -16,8 +16,8 @@ from unittest.mock import patch
 
 from sqlalchemy import delete, insert, select
 
-from . import query
-from .auth import hash_password, verify_password
+from .services import query
+from .services.auth import hash_password, verify_password
 from .config import settings
 from .db import SessionLocal, engine
 from .detail_schema import create_detail_tables, local_table, other_table

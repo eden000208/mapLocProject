@@ -6,7 +6,7 @@ import re
 from sqlalchemy import create_engine, select, text
 
 from . import models
-from .auth import hash_password
+from .services.auth import hash_password
 from .config import settings
 from .db import Base, SessionLocal, engine
 from .detail_schema import create_detail_tables

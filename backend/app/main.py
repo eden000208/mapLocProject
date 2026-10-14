@@ -1,27 +1,31 @@
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException
 
-from . import auth, detail_upload, query, stations
-from .config import settings
-from .db import engine
+from .controllers import auth, detail_upload, query, stations, system
+from .services import query as query_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    query.start_maintenance()
+    query_service.start_maintenance()
     yield
-    query.stop_maintenance()
+    query_service.stop_maintenance()
 
 
 app = FastAPI(title="BSQ 基站圈选查询", lifespan=lifespan)
-for router in (auth.router, stations.router, query.router, detail_upload.router):
+for router in (
+    auth.router,
+    stations.router,
+    query.router,
+    detail_upload.router,
+    system.router,
+):
     app.include_router(router, prefix="/api")
 
 
@@ -108,25 +112,3 @@ async def database_error(request: Request, exc: SQLAlchemyError):
 @app.exception_handler(Exception)
 async def unexpected_error(request: Request, exc: Exception):
     return error_response(500, "操作失败，请重试或联系管理员")
-
-
-@app.get("/api/health")
-def health():
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return {"status": "ok"}
-    except SQLAlchemyError:
-        return JSONResponse(status_code=503, content={"status": "unavailable"})
-
-
-@app.get("/api/config")
-def public_config(user=Depends(auth.current_user)):
-    return {
-        "tianditu_key": settings.tianditu_key,
-        "map_center": [settings.map_center_lng, settings.map_center_lat],
-        "map_zoom": settings.map_zoom,
-        "min_draw_zoom": settings.min_draw_zoom,
-        "max_cells": settings.max_cells,
-        "max_months": settings.max_months,
-    }
