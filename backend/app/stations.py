@@ -212,7 +212,7 @@ def own_batch(db, batch_id, user, lock=False):
         ImportBatch.id == batch_id, ImportBatch.user_id == user.id
     )
     batch = db.scalar(stmt.with_for_update() if lock else stmt)
-    if not batch:
+    if not batch or batch.filename.startswith("detail:"):
         raise HTTPException(404, "导入不存在")
     return batch
 

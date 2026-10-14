@@ -1,0 +1,3 @@
+month_id,device_number,cell_name,street_name,lac,cell_id
+202610,DEMO_ONLY_NUMBER_001,模拟小区A,模拟街道A,1001,2001
+202611,DEMO_ONLY_NUMBER_002,模拟小区B,模拟街道B,1002,2002

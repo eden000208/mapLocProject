@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException
 
-from . import auth, query, stations
+from . import auth, detail_upload, query, stations
 from .config import settings
 from .db import engine
 
@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="BSQ 基站圈选查询", lifespan=lifespan)
-for router in (auth.router, stations.router, query.router):
+for router in (auth.router, stations.router, query.router, detail_upload.router):
     app.include_router(router, prefix="/api")
 
 
