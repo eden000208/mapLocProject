@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth as legacy_auth
 from app.controllers import auth, detail_upload, query, stations, system
 from app.db import get_db
 from app.dependencies import current_user, require_admin, require_query
@@ -50,15 +49,29 @@ def test_each_endpoint_forwards_all_parameters_once(controller, endpoint, monkey
 
 
 def test_layers_and_dependency_identity():
-    assert legacy_auth.current_user is current_user
-    assert legacy_auth.require_admin is require_admin
-    assert legacy_auth.require_query is require_query
+    assert auth.current_user is current_user
+    assert require_admin.__defaults__[0].dependency is current_user
+    assert require_query.__defaults__[0].dependency is current_user
     assert auth.current_user is stations.require_admin.__defaults__[0].dependency
     assert auth.require_admin is detail_upload.require_admin is require_admin
     assert stations.require_query is query.require_query is require_query
     assert system.current_user is current_user
     assert auth.LoginBody is LoginBody
+    expected_dependencies = {
+        "current_user": current_user,
+        "require_admin": require_admin,
+        "require_query": require_query,
+        "get_db": get_db,
+    }
+
+    def check_dependencies(dependant):
+        for child in dependant.dependencies:
+            assert child.call is expected_dependencies[child.call.__name__]
+            check_dependencies(child)
+
     for controller in CONTROLLERS:
+        for route in controller.router.routes:
+            check_dependencies(route.dependant)
         tree = ast.parse(Path(controller.__file__).read_text(encoding="utf-8"))
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

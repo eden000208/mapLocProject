@@ -201,7 +201,7 @@ mapWeb/
 └── AGENTS.md / .gitignore / .gitattributes / .dockerignore
 ```
 
-controller 负责请求参数与依赖注入，统一委派 service；DTO 保留现有字段和校验。事务、授权复核、MySQL 网别锁、查询线程池及空间索引均留在对应 service。旧同名模块仅保留明确的兼容导出；新功能和测试直接导入分层模块。详细迁移对应见[接口说明](docs/API.md)。
+controller 负责请求参数与依赖注入，统一委派 service；DTO 保留现有字段和校验。事务、授权复核、MySQL 网别锁、查询线程池及空间索引均留在对应 service。代码和测试直接导入当前分层模块，旧兼容转发模块已移除。各层职责见[接口说明](docs/API.md)。
 
 `backend/data/` 为本地运行文件，`.venv/`、`frontend/node_modules/` 为开发依赖；这些目录均保留但不提交。浏览器验收截图、缓存及 `frontend/dist/` 可重新生成，2026-10-14 的清理已将其可恢复归档到项目外，不影响源码、配置或数据库。
 

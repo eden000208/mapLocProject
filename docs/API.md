@@ -58,22 +58,19 @@ GET /health → {status:'ok'|'unavailable'}，无数据库连接时503。
 
 `get_db`/`SessionLocal` 位于 `db.py`；配置、ORM 模型、明细来源、坐标及日志仍为共享基础设施。`audit.py` 导出 `log_event(db, user_id, action, params=None)`，不自动 commit；仅摘要，不含号码/uid。
 
-原 `app.auth`、`app.stations`、`app.query`、`app.detail_upload` 仅显式重导出旧入口，不保留第二份业务实现。新增代码直接从分层模块导入；业务测试 mock 应 patch 实现所在的 service，HTTP 依赖 override 使用 `dependencies` 中的函数。
+直接从当前分层模块导入；业务测试 mock 应 patch 实现所在的 service，HTTP 依赖 override 使用 `dependencies` 中的函数。无生产引用的旧兼容转发模块已移除。
 
-### 原实现迁移对应
+### 当前模块职责
 
-| 原位置 | 新位置 | 迁移内容 |
-| --- | --- | --- |
-| `app.auth` | `services/auth.py` | 原账号业务及辅助函数，共15个函数，函数体不变 |
-| `app.auth` | `dependencies.py` | `current_user`、`require_admin`、`require_query`，函数体及依赖身份不变 |
-| `app.auth` | `dto/auth.py` | `LoginBody`、`PasswordBody`、`UserBody`、`UserPatch` |
-| `app.stations` | `services/stations.py` | 原19个函数、空间索引及锁 |
-| `app.stations` | `dto/stations.py` | `PreviewBody`、`StationPatch`、`SelectionBody` |
-| `app.query` | `services/query.py` | 原27个函数、`TaskInterrupted`、查询运行状态 |
-| `app.query` | `dto/query.py` | `CellKey`、`QueryBody` |
-| `app.detail_upload` | `services/detail_upload.py` | 原13个函数、导入常量及事务/网别锁边界 |
-| `app.main` | `services/system.py` | `health`、`public_config` 原函数体 |
-| 原业务模块及 `app.main` | `controllers/{auth,stations,query,detail_upload,system}.py` | 原29个 HTTP 操作的同名路由函数，原签名/默认值/依赖不变，仅委派 |
+| 模块 | 职责 |
+| --- | --- |
+| `controllers/` | 29 个 HTTP 操作的路由、参数与依赖声明，委派对应 service |
+| `services/auth.py` / `dto/auth.py` | 账号业务、可见范围及账号请求模型 |
+| `dependencies.py` | 身份、CSRF、管理员及查询权限依赖 |
+| `services/stations.py` / `dto/stations.py` | 基站维护/导入/圈选、空间索引与请求模型 |
+| `services/query.py` / `dto/query.py` | 查询、导出、线程运行状态、TTL及请求模型 |
+| `services/detail_upload.py` | 明细导入校验、事务及网别互斥锁 |
+| `services/system.py` | 健康检查与公开配置 |
 
 `main.py` 保留应用装配、异常处理和生命周期；生命周期调用 query service。服务函数不声明 `Depends`、`Query`、`File` 或 `Form`，所有路由参数由 controller 显式传入。未新增持久化层、数据表、数据库或迁移框架。
 

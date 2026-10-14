@@ -87,3 +87,11 @@
 - 本次浏览器验收截图及脚本现已可恢复归档至项目外 `D:\CodexProject\mapWeb-cleanup-archive-20261014\backend-ui-20261014\output\playwright`；前述 `output/playwright` 路径为验收时位置。根 output 仅包含 playwright 目录，已一并归档空容器层级。
 - 同步归档 `.playwright-cli`、根 `.ruff_cache`、`backend/.pytest_cache`、`backend/app`（含 controllers/dto/services）及 `backend/tests` 的5个 `__pycache__`、`frontend/dist`。逐项验证源路径位于项目目录内，使用 PowerShell `Move-Item -LiteralPath` 移动，未删除历史产物。
 - 保留核心源码、tests、权威文档、模板/模拟样例、部署及依赖配置，以及 `.env`、运行 data、虚拟环境和 node_modules；未发现应删除的已跟踪非核心文件，未强删。README 更新为完整项目结构，说明前端面板、API/类型/样式、后端分层/工具/命令/测试/依赖、部署、文档及配置。未操作数据库。
+
+## 仅保留当前核心结构复查（2026-10-14）
+
+- 全项目复查确认根 `app/auth.py`、`app/query.py`、`app/stations.py`、`app/detail_upload.py` 为无生产引用的纯兼容转发壳，已移除；生产模块、命令及业务测试均直接导入当前分层路径。未发现其他可安全移除的已跟踪孤立重复代码；保留包标记、基础设施、命令、测试、配置、权威文档和业务模板/模拟样例。
+- `test_layers` 移除旧壳导入，改为逐层检查全部实际路由依赖图中的身份/管理员/查询权限及 get_db 函数身份；29项委派、6项HTTP检查及原业务断言均保留。后端 **93 passed**，Ruff通过，Python `py_compile` **38 个文件**通过。
+- 对照本次修改前已提交版本：剩余 **29 个核心源码模块 AST 全部相等**，完整 OpenAPI 文档深比较相等，仍为 **29 个 HTTP 操作**；业务实现、权限、SQL、事务和锁未改。README/API 改为当前分层职责说明，旧迁移对应表移除，历史验收记录保留。
+- 前端 `npm run typecheck`、`npm run build` 通过，仍有既有 Geoman CSS sourcemap 与单包体积提醒。`git diff --check` 通过；未连接或操作数据库，真实数据库及 Linux 部署验证限制继续有效。
+- 验证新生成的根 Ruff缓存、backend pytest缓存、app及tests的5个 Python缓存目录和 frontend/dist（共8项目录）已可恢复移至项目外 `D:\CodexProject\mapWeb-cleanup-archive-20261014\core-only\generated`；对照基线留在该目录的上一级。未移动运行 data、.env、虚拟环境或 node_modules。
