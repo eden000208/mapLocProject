@@ -325,6 +325,7 @@ async function exportXlsx() {
 watch(page, (p) => {
   notice.value = "";
   if (p === "tasks") loadTasks();
+  if (p === "query") loadMonths();
 });
 watch(nets, loadMonths, { deep: true });
 watch([rowNet, plain, size], () => {

@@ -24,6 +24,17 @@ items 可为站点 {kind:'station',station_name,lng,lat,cells:[{lac,cell_id,stat
 POST /selections/resolve {type:'rect'|'polygon'|'circle'|'cells',geometry?,center?,radius?,cells?} → {cells,cell_count,station_count,excluded_count}。
 rect/polygon 使用 GeoJSON Polygon，circle center=[lng,lat] radius 米；cells=[{lac,cell_id}]。
 
+## 管理员明细上传
+
+POST /admin/detail-import multipart {file,network:'local'|'other'} → {batch_id,network}。
+POST /admin/detail-import/{batch_id}/preview → {network,months,rows,error_count,errors:[{row,message}],existing_months,valid}。
+POST /admin/detail-import/{batch_id}/confirm → {imported,months}。
+三个接口均 require_admin、CSRF 校验，批次仅上传本人访问；批次有效期24小时。成功后删除原文件，下次上传清理过期文件。
+支持 CSV（UTF-8/GB18030）和单工作表 XLSX，200 MiB；固定英文列名允许调整列顺序。
+公共列 month_id,device_number,cell_name,street_name,lac,cell_id；本网另有 uid。所有列必须存在；号码非空，名称/uid 可空。month_id 必须为 YYYYMM，lac/cell_id 为非负 BIGINT；号码100字符、uid200字符、名称255字符。文本标识建议在 Excel 中设为文本，禁止公式。
+同网别可包含多个月；任一月份已有数据（含模拟数据）均拒绝，不覆盖、不追加、不去重；错误整批拒绝，预览最多显示100条无原始值错误。无号码/uid预览，无历史页、进度页或模板下载。
+固定写入 bsq_app.detail_local/detail_other，is_demo=false；配置与目标不匹配则拒绝，SQL 值绑定。同网别确认使用 MySQL GET_LOCK 互斥，确认再次完整校验并检查月份，1000行批量写入，明细、批次状态与摘要日志同一事务提交；失败回滚。
+
 ## 查询
 GET /meta/months?nets=local,other → {months:[]}。
 POST /queries {cells:[{lac,cell_id}],months:[],nets:[],purpose} → 任务对象。

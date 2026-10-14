@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, nextTick, watch } from "vue";
 import { api, errorText } from "./api";
+import DetailUploadPane from "./DetailUploadPane.vue";
 import L from "leaflet";
 import {
   UserPlus,
@@ -298,6 +299,7 @@ onBeforeUnmount(() => {
           users: '账号管理',
           stations: '基站维护',
           import: '导入基站',
+          details: '上传用户明细',
         }"
         :key="key"
         :class="{ active: tab === key }"
@@ -307,6 +309,7 @@ onBeforeUnmount(() => {
       </button>
     </div>
     <p v-if="msg" class="inline-message" role="status">{{ msg }}</p>
+    <DetailUploadPane v-if="tab === 'details'" />
     <div v-if="tab === 'users'">
       <div class="toolbar">
         <div class="section-title">
