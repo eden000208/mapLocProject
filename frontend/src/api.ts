@@ -1,5 +1,6 @@
 import axios from "axios";
-export const api = axios.create({ baseURL: "/api", withCredentials: true });
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim() || "/api";
+export const api = axios.create({ baseURL: apiBaseUrl, withCredentials: true });
 let csrf = "";
 export function setCsrf(v: string) {
   csrf = v;
