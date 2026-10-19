@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     map_center_lat: float = 30.98
     map_zoom: int = 11
     min_draw_zoom: int = 12
+    # Only used in the Cloudflare Container; local Compose keeps direct MySQL.
+    cloudflare_mode: bool = False
+    storage_gateway: str = ""
+    mysql_bridge_url: str = ""
 
     def mysql_url(self, database: str | None = None) -> URL:
         return URL.create(

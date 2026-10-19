@@ -1,0 +1,74 @@
+name: Cloudflare checks and release
+
+on:
+  push:
+    branches: [main, codex/cloudflare-hosting]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the checked revision to Cloudflare production
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            cloudflare/package-lock.json
+      - run: pip install -r backend/requirements-dev.txt -r backend/requirements-cloudflare.txt
+      - run: python -m compileall -q backend/app backend/tests
+      - run: python -m ruff check backend/app backend/tests
+      - run: python -m pytest backend/tests -q
+      - run: npm ci && npm run typecheck && npm run build
+        working-directory: frontend
+      - run: npm ci && npm run typecheck && npm run build
+        working-directory: cloudflare
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-build
+          path: cloudflare/.cloudflare/output/
+          include-hidden-files: true
+          retention-days: 3
+
+  deploy:
+    needs: verify
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CLOUDFLARE_AUTO_DEPLOY == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy)
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+        working-directory: cloudflare
+      - uses: actions/download-artifact@v4
+        with:
+          name: cloudflare-build
+          path: cloudflare/.cloudflare/output/
+      - name: Deploy checked build
+        working-directory: cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run deploy -- --prebuilt

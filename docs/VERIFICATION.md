@@ -95,3 +95,16 @@
 - 对照本次修改前已提交版本：剩余 **29 个核心源码模块 AST 全部相等**，完整 OpenAPI 文档深比较相等，仍为 **29 个 HTTP 操作**；业务实现、权限、SQL、事务和锁未改。README/API 改为当前分层职责说明，旧迁移对应表移除，历史验收记录保留。
 - 前端 `npm run typecheck`、`npm run build` 通过，仍有既有 Geoman CSS sourcemap 与单包体积提醒。`git diff --check` 通过；未连接或操作数据库，真实数据库及 Linux 部署验证限制继续有效。
 - 验证新生成的根 Ruff缓存、backend pytest缓存、app及tests的5个 Python缓存目录和 frontend/dist（共8项目录）已可恢复移至项目外 `D:\CodexProject\mapWeb-cleanup-archive-20261014\core-only\generated`；对照基线留在该目录的上一级。未移动运行 data、.env、虚拟环境或 node_modules。
+# 2026-10-19 Cloudflare 适配分支验证
+
+- 分支 `codex/cloudflare-hosting`；无真实数据库写入、无云端资源变更和发布。
+- Python compileall、ruff check 通过；完整 mock 测试 102 项通过。
+- 新增测试覆盖分片顺序/完整性和本人归属、操作权限变更、文件恢复/删除、
+  TCP/WebSocket 模拟双向二进制与服务端主动握手。所有数据均为 MOCK_ONLY。
+- Vue typecheck/build 通过；保留 Leaflet Geoman CSS sourcemap 和大 chunk 警告。
+- Worker/配置 TypeScript 检查通过；Worker JS 和 Vue 静态资源打包阶段通过。
+- 完整 Cloudflare 构建未通过：本机没有 Docker CLI，容器镜像无法构建。
+  GitHub Linux 检查流水线已加入完整镜像构建，但未推送/运行该流水线。
+- 尚未验证容器私有出站 WebSocket、VPC/Tunnel/MySQL 实际链路、200 MiB
+  文件性能、重启后的云端 R2 恢复、账号 Containers 配额及部署发布。
+  本分支为待云端集成验收的实现，不代表已可生产运行。

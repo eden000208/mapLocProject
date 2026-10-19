@@ -20,6 +20,7 @@ from ..config import settings
 from ..dto.stations import PreviewBody, SelectionBody, StationPatch
 from ..geo import distance_m, to_wgs, valid_coordinate
 from ..models import ImportBatch, Station, User, utcnow
+from .. import storage
 from .auth import cell_visible
 
 _lock = threading.RLock()
@@ -204,7 +205,7 @@ def own_batch(db, batch_id, user, lock=False):
         ImportBatch.id == batch_id, ImportBatch.user_id == user.id
     )
     batch = db.scalar(stmt.with_for_update() if lock else stmt)
-    if not batch or batch.filename.startswith("detail:"):
+    if not batch or batch.filename.startswith(("detail:", "chunks:")):
         raise HTTPException(404, "导入不存在")
     return batch
 
@@ -249,6 +250,7 @@ async def upload(file: UploadFile, user: User, db: Session):
                     )
                 stream.write(chunk)
         headers, rows = read_upload(path)
+        storage.persist(path)
         batch = ImportBatch(
             id=batch_id,
             user_id=user.id,
@@ -277,7 +279,7 @@ def preview(batch_id: str, body: PreviewBody, user: User, db: Session):
     batch = own_batch(db, batch_id, user, True)
     if batch.status == "CONFIRMED":
         raise HTTPException(409, "此导入已确认")
-    headers, rows = read_upload(Path(batch.path))
+    headers, rows = read_upload(storage.restore(batch.path))
     valid, errors, warnings = parse_rows(headers, rows, body.mapping, body.coord_sys)
     existing = 0
     for start in range(0, len(valid), 500):
@@ -328,7 +330,7 @@ def confirm(batch_id: str, user: User, db: Session):
         return batch.preview["confirmed"]
     if not batch.preview or batch.status != "PREVIEWED":
         raise HTTPException(409, "请先预览")
-    headers, rows = read_upload(Path(batch.path))
+    headers, rows = read_upload(storage.restore(batch.path))
     valid, errors, _ = parse_rows(
         headers, rows, batch.preview["mapping"], batch.preview["coord_sys"]
     )
@@ -356,7 +358,7 @@ def errors_csv(batch_id: str, user: User, db: Session):
     batch = own_batch(db, batch_id, user)
     if not batch.preview:
         raise HTTPException(409, "请先预览")
-    headers, rows = read_upload(Path(batch.path))
+    headers, rows = read_upload(storage.restore(batch.path))
     _, errors, _ = parse_rows(
         headers, rows, batch.preview["mapping"], batch.preview["coord_sys"]
     )

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { api, errorText } from "./api";
+import { errorText, runOperation, uploadDetails } from "./api";
 import { UploadCloud, FileCheck2, CheckCircle2, Info } from "lucide-vue-next";
 const network = ref("local"), busy = ref(false), message = ref("");
 const batch = ref(""), preview = ref<any>(null), completed = ref(false);
@@ -14,8 +14,7 @@ async function upload(event: Event) {
   }
   busy.value = true;
   try {
-    const data = new FormData(); data.append("file", file); data.append("network", network.value);
-    batch.value = (await api.post("/admin/detail-import", data)).data.batch_id;
+    batch.value = (await uploadDetails(file, network.value)).batch_id;
     message.value = "上传成功，请校验文件。";
   } catch (error) { message.value = errorText(error); }
   finally { busy.value = false; input.value = ""; }
@@ -23,14 +22,14 @@ async function upload(event: Event) {
 async function validate() {
   busy.value = true; message.value = "";
   try {
-    preview.value = (await api.post(`/admin/detail-import/${batch.value}/preview`)).data;
+    preview.value = await runOperation("preview", batch.value);
   } catch (error) { message.value = errorText(error); preview.value = null; }
   finally { busy.value = false; }
 }
 async function confirm() {
   busy.value = true; message.value = "";
   try {
-    await api.post(`/admin/detail-import/${batch.value}/confirm`);
+    await runOperation("confirm", batch.value);
     completed.value = true; message.value = "明细已整批导入，可返回地图查询。";
   } catch (error) { message.value = errorText(error); }
   finally { busy.value = false; }

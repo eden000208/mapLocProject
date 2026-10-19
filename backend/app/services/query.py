@@ -27,6 +27,7 @@ from ..datasource import (
 from ..db import SessionLocal
 from ..dto.query import QueryBody
 from ..models import ImportBatch, QueryRow, QueryTask, User, utcnow
+from .. import storage
 from .stations import validate_cells
 
 logger = logging.getLogger(__name__)
@@ -543,6 +544,13 @@ def recover_tasks() -> None:
                 )
             )
             db.commit()
+        # Interrupted assembly never writes detail rows and can be retried.
+        db.execute(
+            update(ImportBatch)
+            .where(ImportBatch.status == "CHUNK_ASSEMBLING")
+            .values(status="CHUNK_UPLOADING")
+        )
+        db.commit()
 
 
 def cleanup_expired() -> None:
@@ -580,10 +588,18 @@ def cleanup_expired() -> None:
             )
         )
         imports = (settings.data_dir / "imports").resolve()
+        details = (settings.data_dir / "detail_uploads").resolve()
+        chunks = (settings.data_dir / "chunks").resolve()
         for batch in batches:
             path = Path(batch.path).resolve()
-            if path.parent == imports and path.suffix.lower() in (".csv", ".xlsx"):
-                path.unlink(missing_ok=True)
+            if path.parent in (imports, details) and path.suffix.lower() in (
+                ".csv",
+                ".xlsx",
+            ):
+                storage.remove(path)
+            elif path.parent == chunks and batch.filename.startswith("chunks:"):
+                for part in range((batch.preview or {}).get("parts", 0)):
+                    storage.remove(path / f"{part}.part")
             db.delete(batch)
         if batches:
             db.commit()
@@ -595,6 +611,11 @@ def cleanup_expired() -> None:
                 path.stat().st_mtime < threshold
             ):
                 path.unlink(missing_ok=True)
+    operations = settings.data_dir / "operations"
+    if operations.exists():
+        for path in operations.glob("*"):
+            if path.is_file() and path.stat().st_mtime < threshold:
+                storage.remove(path)
 
 
 def maintenance_loop() -> None:

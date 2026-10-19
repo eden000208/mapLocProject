@@ -1,0 +1,27 @@
+{
+  "name": "bsq-cloudflare",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "deploy": "cf deploy",
+    "check": "npm run typecheck"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.64.0",
+    "@cloudflare/workers-types": "5.20261019.1",
+    "@types/node": "26.6.5",
+    "cf": "1.0.0-beta.18",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  }
+}

@@ -18,6 +18,7 @@ from ..datasource import load_sources
 from ..db import engine
 from ..detail_schema import local_table, other_table
 from ..models import ImportBatch, User, utcnow
+from .. import storage
 
 MAX_BYTES = 200 * 1024 * 1024
 FIELDS = ("month_id", "device_number", "cell_name", "street_name", "lac", "cell_id")
@@ -158,7 +159,7 @@ def own_batch(db: Session, batch_id: str, user: User, lock=False):
     if not batch or batch.user_id != user.id or not batch.filename.startswith(PREFIX):
         raise HTTPException(404, "明细上传批次不存在")
     if utcnow() - batch.created_at > timedelta(hours=24):
-        Path(batch.path).unlink(missing_ok=True)
+        storage.remove(batch.path)
         raise HTTPException(410, "上传批次已过期，请重新上传")
     return batch
 
@@ -171,7 +172,7 @@ def clean_expired(db: Session) -> None:
         )
     )
     for batch in batches:
-        Path(batch.path).unlink(missing_ok=True)
+        storage.remove(batch.path)
         db.delete(batch)
     db.commit()
 
@@ -196,6 +197,7 @@ def upload(file: UploadFile, network: str, user: User, db: Session):
                 stream.write(chunk)
         if not size:
             raise HTTPException(422, "文件为空")
+        storage.persist(path)
         batch = ImportBatch(
             id=batch_id,
             user_id=user.id,
@@ -221,7 +223,7 @@ def preview(batch_id: str, user: User, db: Session):
         raise HTTPException(409, "该批次已导入")
     network = batch.preview["network"]
     table = target_table(network)
-    result = scan_file(Path(batch.path), network)
+    result = scan_file(storage.restore(batch.path), network)
     result["existing_months"] = existing_months(db, table, result["months"])
     result["valid"] = result["valid"] and not result["existing_months"]
     batch.preview = result
@@ -236,7 +238,7 @@ def write_batch(db: Session, batch_id: str, user: User) -> dict:
         raise HTTPException(409, "请先完成无错误的校验预览，且不可重复确认")
     network = batch.preview["network"]
     table = target_table(network)
-    result = scan_file(Path(batch.path), network)
+    result = scan_file(storage.restore(batch.path), network)
     if not result["valid"] or result["months"] != batch.preview["months"]:
         raise HTTPException(422, "文件校验失败，请重新上传")
     if existing_months(db, table, result["months"], current=True):
@@ -288,5 +290,5 @@ def confirm(batch_id: str, user: User, db: Session):
             connection.rollback()
             connection.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name})
             connection.commit()
-    path.unlink(missing_ok=True)
+    storage.remove(path)
     return result

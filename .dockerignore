@@ -9,3 +9,7 @@
 .playwright-cli
 output
 **/.ruff_cache
+**/.env*
+**/.dev.vars*
+**/.cloudflare
+**/.wrangler

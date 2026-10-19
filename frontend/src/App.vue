@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
-import { api, errorText, setCsrf } from "./api";
+import { api, errorText, setCsrf, runOperation } from "./api";
 import type { User, Cell, Task } from "./types";
 import MapPane from "./MapPane.vue";
 import AdminPane from "./AdminPane.vue";
@@ -300,11 +300,8 @@ async function exportXlsx() {
   if (!current.value) return;
   busy.value = true;
   try {
-    const r = await api.post(`/queries/${current.value.id}/export`, null, {
-      params: { plain: plain.value },
-      responseType: "blob",
-    });
-    const url = URL.createObjectURL(r.data);
+    const blob = await runOperation("export", current.value.id, plain.value);
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `bsq-${current.value.id}.xlsx`;

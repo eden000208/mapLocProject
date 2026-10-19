@@ -1,5 +1,24 @@
 # BSQ 轻量版接口契约
 
+## Cloudflare 适配新增接口（2026-10-19）
+
+原接口保持，浏览器改用以下分片及异步操作接口，适用于本地和云端。
+
+- POST `/api/admin/detail-uploads` JSON `{filename,network,size}` → `{id,part_size}`。
+  总大小 1～200 MiB；PUT `.../{id}/parts/{part}` 原始二进制，0 起按序，
+  每片 8 MiB（末片除外）。管理员、本人归属、24 小时有效期、CSRF。
+- POST `/api/operations` JSON `{kind,target,plain:false}` → `{id}`。
+  kind=`assemble|preview|confirm|export`；target 为分片上传/明细批次/查询 UUID。
+  assemble/preview/confirm 仅管理员；export 校验本人任务、区域及明文权限。
+- GET `/api/operations/{id}` → `{id,status,message?,result?}`，状态
+  RUNNING/SUCCESS/FAILED；GET `.../{id}/file` 下载成功导出，重新校验当前权限。
+  操作 30 分钟过期，服务重启中的操作失败，不自动重放确认写入。
+- POST `/api/admin/detail-uploads/{id}/complete` 保留同步合并兼容端点，云端前端
+  使用 assemble 操作；结果仍为 `{batch_id,network}`，随后预览和确认。
+
+复用 ImportBatch 保存分片元数据，原子整批导入规则不变。R2 不公开，文件不使用
+公共 URL。部署说明见 CLOUDFLARE.md。
+
 所有接口前缀 /api。JSON 错误 {code,message,trace_id}。时间 ISO UTC。
 登录 Cookie bsq_session；/auth/me 返回 csrf_token；所有写请求带 X-CSRF-Token。
 首次改密前只有 me/logout/change-password 可访问。坐标 [lng,lat]。

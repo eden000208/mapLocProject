@@ -1,5 +1,7 @@
 # BSQ 基站圈选查询系统
 
+Cloudflare 托管及 GitHub 自动部署：[部署说明](docs/CLOUDFLARE.md)。
+
 导入基站 → 地图圈选 → 按月查询本网/异网 → 查看并导出 Excel。
 
 ## 1. Windows 启动服务

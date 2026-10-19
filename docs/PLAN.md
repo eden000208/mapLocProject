@@ -1,5 +1,11 @@
 # BSQ 轻量版实施范围
 
+2026-10-19 Cloudflare 适配分支新增 Workers 静态资源/API 入口 + Containers
+后端部署，原 Linux Compose 保留。持久文件使用私有 R2，数据库使用现有 Tunnel
+的固定目标 VPC Network 通道，保持 MySQL 会话锁。新增分片上传和轮询操作接口，
+不增加业务数据库/表。平台容器控制使用 Durable Object 必需的内部存储，不作
+应用数据库。具体边界及尚未完成的云端验收见 CLOUDFLARE.md。
+
 直接连接 MySQL，创建独立 bsq_app。现有明细仅 SELECT，映射由 datasource.yaml 配置。
 账号密码；用户直接分配区县/营服/明文权限，无独立角色配置页。
 管理员可使用全部菜单、所有有效小区及明文查看；分析员按区县/营服授权，空范围默认拒绝。所有用户只能访问自己的查询任务。

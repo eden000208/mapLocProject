@@ -9,16 +9,39 @@ from starlette.exceptions import HTTPException
 
 from .controllers import auth, detail_upload, query, stations, system
 from .services import query as query_service
+from .mysql_bridge import start_bridge
+from . import cloud_jobs
+from .cloud_jobs import router as jobs_router
+from .chunk_upload import router as chunks_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    bridge = start_bridge()
     query_service.start_maintenance()
-    yield
-    query_service.stop_maintenance()
+    try:
+        yield
+    finally:
+        cloud_jobs.stop()
+        query_service.stop_maintenance()
+        if bridge:
+            bridge.shutdown()
+            bridge.server_close()
 
 
 app = FastAPI(title="BSQ 基站圈选查询", lifespan=lifespan)
+app.include_router(jobs_router, prefix="/api")
+app.include_router(chunks_router, prefix="/api")
+
+
+@app.middleware("http")
+async def private_responses(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 for router in (
     auth.router,
     stations.router,
